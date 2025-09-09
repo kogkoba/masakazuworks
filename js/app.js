@@ -1,5 +1,19 @@
 // ===================== js/app.js（STEP2 完成版） =====================
 const CFG = window.APP_CONFIG;
+// すでにある const CFG = window.APP_CONFIG; の下あたりに追記
+function getCsvUrl(subject){
+  // 1) SUBJECT_CSV_URLS があればそれを使う
+  if (CFG.SUBJECT_CSV_URLS && CFG.SUBJECT_CSV_URLS[subject]) {
+    return CFG.SUBJECT_CSV_URLS[subject];
+  }
+  // 2) なければ従来の export?format=csv にフォールバック
+  const gid = CFG.SUBJECT_GIDS?.[subject];
+  if (Number.isInteger(gid)) {
+    return `https://docs.google.com/spreadsheets/d/${CFG.SPREADSHEET_ID}/export?format=csv&gid=${gid}`;
+  }
+  throw new Error(`「${subject}」のCSV URL/gidが設定されていません`);
+}
+
 const view = document.getElementById("view");
 
 // === ルータ：科目クリック ===
