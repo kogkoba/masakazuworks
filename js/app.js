@@ -1,22 +1,8 @@
-// ===================== js/app.js（STEP2 完成版） =====================
+// ===================== js/app.js（公開CSV優先 完全版） =====================
 const CFG = window.APP_CONFIG;
-// すでにある const CFG = window.APP_CONFIG; の下あたりに追記
-function getCsvUrl(subject){
-  // 1) SUBJECT_CSV_URLS があればそれを使う
-  if (CFG.SUBJECT_CSV_URLS && CFG.SUBJECT_CSV_URLS[subject]) {
-    return CFG.SUBJECT_CSV_URLS[subject];
-  }
-  // 2) なければ従来の export?format=csv にフォールバック
-  const gid = CFG.SUBJECT_GIDS?.[subject];
-  if (Number.isInteger(gid)) {
-    return `https://docs.google.com/spreadsheets/d/${CFG.SPREADSHEET_ID}/export?format=csv&gid=${gid}`;
-  }
-  throw new Error(`「${subject}」のCSV URL/gidが設定されていません`);
-}
-
 const view = document.getElementById("view");
 
-// === ルータ：科目クリック ===
+// === 科目クリック ===
 document.querySelector("nav.subjects")?.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-subject]");
   if (!btn) return;
@@ -25,7 +11,7 @@ document.querySelector("nav.subjects")?.addEventListener("click", (e) => {
   renderSubjectTop(subject);
 });
 
-// === 科目トップ（タブ：全授業 / 授業を選ぶ） ===
+// === 科目トップ（全授業 / 授業を選ぶ） ===
 function renderSubjectTop(subject) {
   view.innerHTML = `
     <div class="card">
@@ -57,6 +43,18 @@ function renderSubjectTop(subject) {
   });
 }
 
+// === CSV URL決定（公開CSV優先） ===
+function getCsvUrl(subject) {
+  if (CFG.SUBJECT_CSV_URLS && CFG.SUBJECT_CSV_URLS[subject]) {
+    return CFG.SUBJECT_CSV_URLS[subject];
+  }
+  const gid = CFG.SUBJECT_GIDS?.[subject];
+  if (Number.isInteger(gid)) {
+    return `https://docs.google.com/spreadsheets/d/${CFG.SPREADSHEET_ID}/export?format=csv&gid=${gid}`;
+  }
+  throw new Error(`「${subject}」のCSV URL/gidが設定されていません`);
+}
+
 // === 全授業タブ ===
 function renderAllLessonsPane(subject) {
   const box = document.getElementById("tabContent");
@@ -86,12 +84,9 @@ function renderAllLessonsPane(subject) {
     const filterMode = document.getElementById("filter_all").value;
     const orderMode = document.getElementById("order_all").value;
 
-    const gid = CFG.SUBJECT_GIDS[subject];
-    if (!Number.isInteger(gid)) return alert(`「${subject}」の gid が未設定です。config.js を編集してください。`);
-
     renderLoading("全授業から読み込み中…");
     try {
-      const rows = await getRowsForSubject(subject, csvUrlFor(gid)); // キャッシュあり
+      const rows = await getRowsForSubject(subject, getCsvUrl(subject));
       const questions = filterRows(rows, { rangeMode: "all", weekCode: "", filterMode });
       if (questions.length === 0) return showEmpty(subject);
       if (orderMode === "rand") shuffleInPlace(questions);
@@ -130,11 +125,8 @@ async function renderPickLessonPane(subject) {
     </div>
   `;
 
-  const gid = CFG.SUBJECT_GIDS[subject];
-  if (!Number.isInteger(gid)) return alert(`「${subject}」の gid が未設定です。config.js を編集してください。`);
-
   try {
-    const rows = await getRowsForSubject(subject, csvUrlFor(gid)); // キャッシュあり
+    const rows = await getRowsForSubject(subject, getCsvUrl(subject));
     const weeks = Array.from(
       new Set(rows.map((r) => String(r[CFG.COLS.week] || "").trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b, "ja"));
@@ -161,11 +153,8 @@ async function renderPickLessonPane(subject) {
   }
 }
 
-// === CSV/キャッシュ周り ===
-function csvUrlFor(gid) {
-  return `https://docs.google.com/spreadsheets/d/${CFG.SPREADSHEET_ID}/export?format=csv&gid=${gid}`;
-}
-const SUBJECT_CACHE = new Map(); // subject -> rows
+// === CSV/キャッシュ ===
+const SUBJECT_CACHE = new Map();
 async function getRowsForSubject(subject, csvUrl) {
   if (SUBJECT_CACHE.has(subject)) return SUBJECT_CACHE.get(subject);
   const rows = await fetchCSV(csvUrl);
@@ -224,7 +213,7 @@ function filterRows(rows, { rangeMode, weekCode, filterMode }) {
       answer: (r[K.answer] ?? "").trim(),
       alt_answers: (r[K.alt] ?? "").trim(),
       image_url: (r[K.image] ?? "").trim(),
-      flag: String(r[K.flag] ?? "").trim().toUpperCase(), // TRUE / FALSE / ""
+      flag: String(r[K.flag] ?? "").trim().toUpperCase(),
     }))
     .filter((r) => r.id && r.question);
 
@@ -267,24 +256,16 @@ function renderQuestion(state) {
       </div>
 
       <div id="judgeArea" style="min-height:38px;margin-top:8px"></div>
-      <div style="height:140px"></div> <!-- IME候補退避 -->
+      <div style="height:140px"></div>
     </div>
   `;
 
   const input = document.getElementById("answerInput");
-  setTimeout(() => {
-    input.focus();
-    input.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, 50);
+  setTimeout(() => { input.focus(); input.scrollIntoView({ block: "center", behavior: "smooth" }); }, 50);
 
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onSubmit(state);
-    }
-  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); onSubmit(state); } });
   document.getElementById("submitBtn").onclick = () => onSubmit(state);
-  document.getElementById("skipBtn").onclick = () => nextQuestion(state); // 未回答は記録しない（要件通り）
+  document.getElementById("skipBtn").onclick = () => nextQuestion(state);
 }
 
 function onSubmit(state) {
@@ -295,7 +276,6 @@ function onSubmit(state) {
 
   const isCorrect = user !== "" && (user === ans || alts.includes(user));
 
-  // ★ G列（TRUE/FALSE）へ最新状態を記録（GAS経由）
   recordResult(q.id, isCorrect, state.subject);
 
   const judge = document.getElementById("judgeArea");
@@ -345,26 +325,14 @@ async function recordResult(id, isCorrect, subject) {
 }
 
 // === ユーティリティ ===
-function renderLoading(text = "Loading…") { view.innerHTML = `<div class="card"><p>${text}</p></div>`; }
-function showEmpty(subject) {
-  view.innerHTML = `<div class="card"><h2>${subject}</h2><p>条件に合う問題が見つかりませんでした。</p><button class="ghost" id="goBack">戻る</button></div>`;
-  document.getElementById("goBack").onclick = () => renderSubjectTop(subject);
-}
-function showError(subject, err) {
-  view.innerHTML = `<div class="card"><h2>${subject}</h2><p>読み込みエラー：${escapeHtml(err.message || err)}</p></div>`;
-  console.error(err);
-}
-function splitAlt(s) { return s ? String(s).split(/[,\u3001，/／\s]+/).filter(Boolean) : []; }
-function normalize(s) {
-  if (s == null) return "";
-  s = String(s).trim();
-  s = zenkakuToHankaku(s);
-  s = kanaToHiragana(s);
-  return s;
-}
-function zenkakuToHankaku(str){ return str.replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/　/g," "); }
-function kanaToHiragana(str){ return str.replace(/[ァ-ン]/g, c => String.fromCharCode(c.charCodeAt(0)-0x60)); }
-function shuffleInPlace(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [a[i],a[j]]=[a[j],a[i]]; } }
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m])); }
+function renderLoading(text="Loading…"){ view.innerHTML = `<div class="card"><p>${text}</p></div>`; }
+function showEmpty(subject){ view.innerHTML = `<div class="card"><h2>${subject}</h2><p>条件に合う問題が見つかりません。</p><button class="ghost" id="goBack">戻る</button></div>`; document.getElementById("goBack").onclick = () => renderSubjectTop(subject); }
+function showError(subject,err){ view.innerHTML = `<div class="card"><h2>${subject}</h2><p>エラー：${escapeHtml(err.message||err)}</p></div>`; }
+function splitAlt(s){ return s?String(s).split(/[,\u3001，/／\s]+/).filter(Boolean):[]; }
+function normalize(s){ if(s==null)return""; s=String(s).trim(); s=zenkakuToHankaku(s); s=kanaToHiragana(s); return s; }
+function zenkakuToHankaku(str){ return str.replace(/[！-～]/g,s=>String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/　/g," "); }
+function kanaToHiragana(str){ return str.replace(/[ァ-ン]/g,s=>String.fromCharCode(s.charCodeAt(0)-0x60)); }
+function shuffleInPlace(a){ for(let i=a.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]];} }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
 function escapeAttr(s){ return escapeHtml(s).replace(/"/g,"&quot;"); }
-// ===============================================================
+// =====================================================
