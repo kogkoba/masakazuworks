@@ -23,6 +23,9 @@ const state = {
   questions: [],      // 絞り込み後の問題
   idx: 0,
   score: 0,
+  phase: "answering", // "answering"（解答入力中）| "review"（採点後/次待ち）
+};
+
 };
 
 /***** ツール関数 *****/
@@ -211,8 +214,13 @@ function current(){ return state.questions[state.idx]; }
 
 function renderQuestion(){
   const row = current();
+  state.phase = "answering";
+
   $("#feedback").innerHTML = "";
   $("#btnNext").classList.add("hidden");
+  $("#btnAnswer").classList.remove("hidden");
+  $("#btnAnswer").disabled = false;
+  $("#answerInput").disabled = false;
   $("#answerInput").value = "";
 
   // 画像
