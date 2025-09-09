@@ -31,15 +31,13 @@ const show = (id) => $(id).classList.remove("hidden");
 const hide = (id) => $(id).classList.add("hidden");
 const setText = (id, text) => ($(id).textContent = text);
 
-function shuffleInPlace(arr){
-  for (let i=arr.length-1;i>0;i--){
-    const j = (Math.random()* (i+1))|0;
-    [arr[i],arr[j]] = [arr[j],arr[i]];
-  }
-  return arr;
-}
+/***** 状態 *****/
+// … state 定義 …
 
-// CSVを使うならここをCSVパースに。今はJSON前提（配列）で実装。
+/***** ツール関数 *****/
+// … $() / show() / hide() / setText() / shuffleInPlace() …
+
+// === ここに fetchQuestions を置き換え ===
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
@@ -48,16 +46,52 @@ async function fetchQuestions(subjectKey){
     const res = await fetch(url, { cache: "no-store" });
     if(!res.ok) throw new Error(`failed: ${url}`);
     const csv = await res.text();
-    const rows = parseCSV(csv);
+    const rows = parseCSV(csv);   // ← parseCSVを呼ぶ
     return rows;
   }catch(e){
     console.warn(e);
-    // フォールバック（最低限）
     return [
       {id:"G4M00001", week:"2025-W36", question:"3×4の答えは？", answer:"12", alt_answers:"12", image_url:"", enabled:""}
     ];
   }
 }
+
+// === そのすぐ下に parseCSV を定義 ===
+function parseCSV(text){
+  text = text.replace(/\r/g, "");
+  const rows = [];
+  let i = 0, field = "", row = [], inQ = false;
+
+  const pushField = () => { row.push(field); field=""; };
+  const pushRow   = () => { rows.push(row); row=[]; };
+
+  while(i < text.length){
+    const c = text[i];
+    if(inQ){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if(c === '"'){ inQ = true; i++; continue; }
+    if(c === ","){ pushField(); i++; continue; }
+    if(c === "\n"){ pushField(); pushRow(); i++; continue; }
+    field += c; i++;
+  }
+  if(field.length || row.length){ pushField(); pushRow(); }
+
+  if(rows.length === 0) return [];
+  const header = rows[0].map(s => s.trim());
+  return rows.slice(1).filter(r => r.some(v => v !== "")).map(cols => {
+    const obj = {};
+    header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").trim());
+    return obj;
+  });
+}
+
+/***** 画面遷移とイベント *****/
+// … STEP1, STEP2 の処理がここから始まる …
 
 async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
