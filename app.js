@@ -1,7 +1,7 @@
 /***** 設定 *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbx9PKDGh-a5AkeSz5sPlJlCsJZSZGYa7iqCnIcLaCFAk1iHo0mi7T-RlLbZcTzWf9HBJw/exec";
 
-// あなたのスプレッドシートID（閲覧可能にしておくこと）
+// 公開済みのスプレッドシートID
 const SHEET_ID = "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA";
 
 const SUBJECTS = {
@@ -16,7 +16,7 @@ const state = {
   subject: null,
   sheetName: null,
   rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "G4-C00"
+  week: null,         // 例: "G4-c01"
   pool: "all",        // all | wrong_blank
   order: "seq",       // seq | shuffle
   questions: [],
@@ -44,7 +44,6 @@ function shuffleInPlace(arr){
    ========================================================= */
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
-  // すべての列を取得（tq=select *）
   const url =
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
     `?tq=${encodeURIComponent("select *")}` +
@@ -54,7 +53,7 @@ async function fetchQuestions(subjectKey){
     const res = await fetch(url, { cache: "no-store" });
     const text = await res.text();
 
-    // 公開されておらず HTML が返った場合に検出
+    // 非公開/HTMLのとき
     if (!res.ok || text.startsWith("<!DOCTYPE") || /Sign in|ログイン/i.test(text)) {
       console.error("GViz fetch failed or sheet not public:", url, text.slice(0,200));
       return [];
@@ -70,33 +69,22 @@ async function fetchQuestions(subjectKey){
 }
 
 /* =========================================================
-   GViz JSON を {id, week, question, …} 配列へ変換（堅牢版）
-   すべてのキーは小文字化して返す（week, image_url 等）
+   GViz JSON → {id, week, question, …} 配列（キーは小文字化）
    ========================================================= */
 function parseGvizJson(text){
-  // 典型: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
   let jsonStr = "";
   const m = text.match(/setResponse\(([\s\S]+)\);?/);
-  if (m) {
-    jsonStr = m[1];
-  } else {
-    // ラッパーが無いケースの保険
+  if (m) jsonStr = m[1];
+  else {
     const s = text.indexOf("{");
     const e = text.lastIndexOf("}");
     if (s !== -1 && e !== -1 && e > s) jsonStr = text.slice(s, e + 1);
   }
-  if (!jsonStr) {
-    console.error("GViz wrapper not found:", text.slice(0,200));
-    return [];
-  }
+  if (!jsonStr) return [];
 
   let data;
-  try {
-    data = JSON.parse(jsonStr);
-  } catch (e) {
-    console.error("GViz JSON parse error:", e, jsonStr.slice(0,200));
-    return [];
-  }
+  try { data = JSON.parse(jsonStr); }
+  catch { return []; }
 
   if (!data.table || !Array.isArray(data.table.cols)) return [];
 
@@ -111,7 +99,6 @@ function parseGvizJson(text){
       if (v == null) v = "";
       obj[key] = String(v).trim();
     });
-    // 空行除外
     if (Object.values(obj).some(v => v !== "")) out.push(obj);
   }
   return out;
@@ -128,6 +115,7 @@ async function setFlag({sheetName, id, result}){
   return res.json(); // {status, sheet, row, col}
 }
 
+/***** 採点ユーティリティ *****/
 function normalizeAnswers(row){
   const base = (row.answer ?? "").toString().trim();
   const alts = (row.alt_answers ?? "")
@@ -147,6 +135,18 @@ function go(toId){
   show(toId);
 }
 
+/***** 授業回コード取得（week/code/group どれでも拾う） *****/
+const codeOf = (r) => (r["week"] || r["code"] || r["group"] || "").toString().trim().toLowerCase();
+// G4-c01 等を grade-subj-num でゼロ埋めして並べ替え安定化
+const codeKey = (c)=>{
+  const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
+  if(!m) return c;
+  const grade = m[1].padStart(2,"0");
+  const subj  = m[2];
+  const num   = m[3].padStart(2,"0");
+  return `${grade}-${subj}-${num}`;
+};
+
 /* =========================================================
    STEP1 科目選択
    ========================================================= */
@@ -161,8 +161,9 @@ $("#step1").addEventListener("click", async (ev)=>{
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 授業回（week 列）
-  const weeks = [...new Set(all.map(r => (r["week"] || "").trim()).filter(Boolean))].sort();
+  // 授業回（G4-c01 など）候補
+  const weeks = [...new Set(all.map(codeOf).filter(Boolean))].sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
+
   const sel = $("#weekSelect");
   if (sel) {
     sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
@@ -183,6 +184,7 @@ document.querySelectorAll('input[name="range"]').forEach(r=>{
     else hide("#weekPicker");
   });
 });
+
 $("#toStep3").addEventListener("click", ()=>{
   state.rangeMode = document.querySelector('input[name="range"]:checked').value;
   if (state.rangeMode === "byWeek") {
@@ -214,12 +216,18 @@ $("#startQuiz").addEventListener("click", ()=>{
   state.order = document.querySelector('input[name="order"]:checked').value;
 
   let rows = state._all.slice();
+
+  // 授業回コードで絞り込み
   if(state.rangeMode === "byWeek"){
-    rows = rows.filter(r => (r["week"] || "") === state.week);
+    const target = (state.week || "").toLowerCase();
+    rows = rows.filter(r => codeOf(r) === target);
   }
+
+  // 不正解・未解答のみ
   if(state.pool === "wrong_blank"){
     rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
   }
+
   if(state.order === "shuffle") shuffleInPlace(rows);
 
   state.questions = rows;
@@ -302,20 +310,14 @@ async function handleAnswer(kind){
 $("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
 $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
 
+// Enter：採点 → 次へ、Shift+Enter：スキップ
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
-
-  // Shift+Enter でスキップ
   if (e.shiftKey && state.phase === "answering") {
-    $("#btnSkip").click();
-    e.preventDefault();
-    return;
+    $("#btnSkip").click(); e.preventDefault(); return;
   }
-  if (state.phase === "answering") {
-    $("#btnAnswer").click();   // 採点
-  } else if (state.phase === "review") {
-    $("#btnNext").click();     // 次の問題へ
-  }
+  if (state.phase === "answering") { $("#btnAnswer").click(); }
+  else if (state.phase === "review") { $("#btnNext").click(); }
   e.preventDefault();
 });
 
