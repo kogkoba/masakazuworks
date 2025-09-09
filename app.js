@@ -73,58 +73,28 @@ async function fetchQuestions(subjectKey){
   }
 }
 
-// === GViz JSON → {id, week, question, …} 配列へ変換（列名を強制正規化） ===
+// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ欠落も吸収） ===
+// ※ ここで _row に元の行番号を保持して、順番出題を安定化
 function parseGvizJson(text){
   const m = text.match(/setResponse\(([\s\S]+)\);/);
   if(!m) return [];
+
   const data = JSON.parse(m[1]);
 
-  // もとのラベル配列
-  let cols = (data.table.cols || []).map(c => (c.label || ""));
+  // 見出しを取得。無ければ空になる
+  let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
 
-  // ラベル正規化関数：余計な値が混ざっても既知の列名に寄せる
-  const norm = (h) => {
-    const s = String(h).toLowerCase().trim();
-
-    // まず既知の単語が含まれていたらそれに寄せる
-    if (/\bid\b/.test(s)) return "id";
-    if (/\bweek\b|授業|週|回/.test(s)) return "week";
-    if (/\bquestion\b|問題/.test(s)) return "question";
-    if (/\banswer\b|答え|解答?/.test(s)) return "answer";
-    if (/alt[_\s-]*answers?/.test(s)) return "alt_answers";
-    if (/image[_\s-]*url|画像/.test(s)) return "image_url";
-    if (/\benabled\b|結果|フラグ/.test(s)) return "enabled";
-
-    // 空や未知の場合はそのまま返す（後で補完）
-    return s || "";
-  };
-
-  // ラベルを正規化
-  cols = cols.map(norm);
-
-  // 全部空なら既知の列並びを仮定
+  // ★ヘッダが無い場合は rows[0] をヘッダ扱いにして削除
   if (cols.length === 0 || cols.every(c => c === "")) {
-    cols = ["id","week","question","answer","alt_answers","image_url","enabled"];
-  }
-
-  // 1行目が“見出し行そのもの”のときは、それを採用
-  const first = data.table.rows?.[0];
-  if (first && first.c) {
-    const guess = first.c.map(cell => (cell?.v ?? cell?.f ?? "")).map(norm);
-    // “week/ question など既知のキーを複数含む”ならヘッダとみなし採用
-    const hit = guess.filter(k => ["id","week","question","answer","alt_answers","image_url","enabled"].includes(k));
-    if (hit.length >= 2) {
-      cols = guess;
+    const first = data.table.rows?.[0];
+    if (first && first.c) {
+      cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
       data.table.rows.shift();
     }
   }
 
-  // 空の列名は順番で補完
-  const fallback = ["id","week","question","answer","alt_answers","image_url","enabled"];
-  cols = cols.map((c,i)=> c || fallback[i] || `col${i}`);
-
-  // 行をオブジェクト化
   const out = [];
+  let rowIndex = 0;
   for (const r of (data.table.rows || [])){
     const obj = {};
     (r.c || []).forEach((cell, idx) => {
@@ -132,119 +102,114 @@ function parseGvizJson(text){
       let v = cell?.v ?? cell?.f ?? "";
       obj[key] = String(v).trim();
     });
-    if (Object.values(obj).some(v => v !== "")) out.push(obj);
+    // 空行を除外（どこかに値がある行だけ採用）
+    if (Object.values(obj).some(v => v !== "")) {
+      obj._row = rowIndex++; // 元の並びを保持
+      out.push(obj);
+    }
   }
   return out;
 }
-/* CSV → 配列（1行目ヘッダを小文字化） */
-// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ異常も吸収） ===
-function parseGvizJson(text){
-  const m = text.match(/setResponse\(([\s\S]+)\);/);
-  if(!m) return [];
 
-  const data = JSON.parse(m[1]);
-  const table = data.table || {};
-  const hdrCount = table.parsedNumHeaders || 0;
+/* CSV → 配列（1行目ヘッダを小文字化）
+   ※ こちらも _row を付与して順序を保持 */
+function parseCSV(text){
+  text = text.replace(/\r/g, "");
+  const rows = [];
+  let i = 0, field = "", row = [], inQ = false;
 
-  // 1) 列ラベルを取得し、正規化
-  const rawLabels = (table.cols || []).map(c => (c.label || "").toString().trim().toLowerCase());
+  const pushField = () => { row.push(field); field=""; };
+  const pushRow   = () => { rows.push(row); row=[]; };
 
-  // 先頭トークンだけ抽出し、想定キーに寄せる
-  const normalizeLabel = (s) => {
-    const tok = (s.split(/\s+/)[0] || "").trim(); // "week g4-c00" -> "week"
-    // ゆるめのマッピング
-    if (/^id$/.test(tok) || /id/.test(tok)) return "id";
-    if (/^week$/.test(tok) || /week|授業回|週|回/.test(tok)) return "week";
-    if (/^question$/.test(tok) || /question|問/.test(tok)) return "question";
-    if (/^answer$/.test(tok) || /answer|答/.test(tok)) return "answer";
-    if (/^alt_answers$/.test(tok) || /alt|別解|許容/.test(tok)) return "alt_answers";
-    if (/^image_url$/.test(tok) || /image|img|画像/.test(tok)) return "image_url";
-    if (/^enabled$/.test(tok) || /enable|有効/.test(tok)) return "enabled";
-    if (/^code$/.test(tok) || /^group$/.test(tok)) return tok;
-    return tok || "col";
-  };
-  let cols = rawLabels.map(normalizeLabel);
+  while(i < text.length){
+    const c = text[i];
+    if(inQ){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if(c === '"'){ inQ = true; i++; continue; }
+    if(c === ","){ pushField(); i++; continue; }
+    if(c === "\n"){ pushField(); pushRow(); i++; continue; }
+    field += c; i++;
+  }
+  if(field.length || row.length){ pushField(); pushRow(); }
+  if(rows.length === 0) return [];
 
-  // 2) データ行（GViz がヘッダと判断した行はスキップ）
-  const dataRows = (table.rows || []).slice(hdrCount);
-
+  const header = rows[0].map(s => s.toString().trim().toLowerCase());
   const out = [];
-  for (const r of dataRows){
-    const obj = {};
-    (r.c || []).forEach((cell, idx) => {
-      const key = cols[idx] || `col${idx}`;
-      let v = cell?.v ?? cell?.f ?? "";
-      // booleanや数値も文字列にそろえる
-      obj[key] = String(v).trim();
+  let rowIndex = 0;
+  rows.slice(1)
+    .filter(r => r.some(v => v !== ""))
+    .forEach(cols => {
+      const obj = {};
+      header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
+      obj._row = rowIndex++;
+      out.push(obj);
     });
-    if (Object.values(obj).some(v => v !== "")) out.push(obj);
-  }
   return out;
 }
+
 /***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
   const res = await fetch(GAS_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
     body
   });
   return res.json();
 }
 
-/***** 採点 *****/
+/***** 採点（alt_answers 改良版） *****/
 // 比較用の軽い正規化：全角縦棒→半角、全角スペース→半角、連続空白を1つに
 function normalizeForCompare(s){
   return String(s ?? "")
-    .replace(/｜/g, "|")   // 全角縦棒→半角
-    .replace(/\u3000/g, " ") // 全角スペース→半角
+    .replace(/｜/g, "|")
+    .replace(/\u3000/g, " ")
     .trim()
-    .replace(/\s+/g, " ");   // 連続空白→1空白
+    .replace(/\s+/g, " ");
 }
 
-// alt_answers を “| , 、 ; /（全角/半角）” で区切る（空白では区切らない！）
+// alt_answers は “| , 、 ; /（全角/半角）” でのみ区切る（空白は区切らない）
 function buildAnswerSet(row){
   const base = normalizeForCompare(row.answer);
   const altsRaw = String(row.alt_answers ?? "");
   const alts = altsRaw
-    .replace(/｜/g, "|") // 全角縦棒の統一
-    .split(/[|,、;／/]+/) // 区切り記号のみで分割（空白は含めない）
+    .replace(/｜/g, "|")
+    .split(/[|,、;／/]+/)
     .map(normalizeForCompare)
     .filter(Boolean);
 
   return new Set([base, ...alts]);
 }
-
 function matchAnswer(row, userInput){
   const set = buildAnswerSet(row);
   const user = normalizeForCompare(userInput);
   return set.has(user);
 }
+
 /***** 授業回コード抽出（week / code / group を自動判定） *****/
 const codeOf = (r) => {
-  if (!r) return "";
-  // キー名をゆるく拾う（week / code / group / 授業回 等）
   const keys = Object.keys(r);
-  const findKey = (names) =>
-    keys.find(k => names.includes(k.toLowerCase().trim()));
-  const k =
-    findKey(["week"]) ||
-    findKey(["code"]) ||
-    findKey(["group"]) ||
-    findKey(["授業回","週","回"]) || null;
-
-  const v = k ? r[k] : "";
-  return (v ?? "").toString().trim().toLowerCase();
+  const pick = (name) => keys.find(k => k.toLowerCase().trim() === name);
+  let key =
+    pick("week")   ||
+    pick("code")   ||
+    pick("group")  ||
+    keys.find(k => ["授業回","週","回"].includes(k.trim()));
+  if (!key) return "";
+  return (r[key] || "").toString().trim().toLowerCase();
 };
-
-// g4-c01 形式を自然順で並べるためのソートキー
-const codeKey = (c) => {
-  c = (c ?? "").toString().trim().toLowerCase();
+// コードの自然順ソート（g4-c01 などを grade-subj-num で並べ替え）
+const codeKey = (c)=>{
   const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
-  if (!m) return c; // 非対応形式はそのまま
-  const grade = m[1].padStart(2, "0");
+  if(!m) return c;
+  const grade = m[1].padStart(2,"0");
   const subj  = m[2];
-  const num   = m[3].padStart(2, "0");
+  const num   = m[3].padStart(2,"0");
   return `${grade}-${subj}-${num}`;
 };
 
@@ -268,6 +233,7 @@ $("#step1").addEventListener("click", async (ev)=>{
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
+  // 授業回候補を抽出
   const weeks = [...new Set(all.map(codeOf).filter(Boolean))]
     .sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
 
@@ -311,7 +277,7 @@ document.querySelectorAll('[data-back]').forEach(b=>{
    STEP3 出題対象
    ========================= */
 $("#toStep4").addEventListener("click", ()=>{
-  state.pool = document.querySelector('input[name="pool"]:checked').value;
+  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
   go("#step4");
 });
 
@@ -322,14 +288,24 @@ $("#startQuiz").addEventListener("click", ()=>{
   state.order = document.querySelector('input[name="order"]:checked').value;
 
   let rows = state._all.slice();
+
+  // 授業回で絞り込む
   if(state.rangeMode === "byWeek"){
     const target = (state.week || "").toLowerCase();
     rows = rows.filter(r => codeOf(r) === target);
   }
+
+  // 既正解/未解答のみ
   if(state.pool === "wrong_blank"){
     rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
   }
-  if(state.order === "shuffle") shuffleInPlace(rows);
+
+  // ★順番（seq）はシートの元順（_row）で確実に並べる
+  if (state.order === "seq") {
+    rows.sort((a,b)=> (a._row ?? 0) - (b._row ?? 0));
+  } else {
+    shuffleInPlace(rows);
+  }
 
   state.questions = rows;
   state.idx = 0;
@@ -372,7 +348,7 @@ function renderQuestion(){
 }
 
 async function handleAnswer(kind){
-  if (state.phase !== "answering") return;
+  if (state.phase !== "answering") return; // 連打防止
 
   const row = current();
   let resultFlag = "BLANK";
@@ -411,6 +387,7 @@ async function handleAnswer(kind){
 $("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
 $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
 
+// Enter：採点 → 次へ、Shift+Enter：スキップ
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   if (e.shiftKey && state.phase === "answering") { $("#btnSkip").click(); e.preventDefault(); return; }
