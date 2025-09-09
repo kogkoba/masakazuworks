@@ -3,24 +3,89 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>正和復習ゲーム</title>
+  <title>正和復習システム</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="wrap">
-    <h1>正和復習ゲーム</h1>
+    <h1>正和復習システム</h1>
 
-    <nav class="subjects">
-      <button data-subject="kokugo">国語</button>
-      <button data-subject="sansu">算数</button>
-      <button data-subject="rika">理科</button>
-      <button data-subject="shakai">社会</button>
-    </nav>
+    <!-- STEP 1: 科目選択 -->
+    <section id="step1" class="card">
+      <h2>① 科目を選ぶ</h2>
+      <div class="row">
+        <button class="primary" data-subject="算数">算数</button>
+        <button class="primary" data-subject="国語">国語</button>
+        <button class="primary" data-subject="理科">理科</button>
+        <button class="primary" data-subject="社会">社会</button>
+      </div>
+    </section>
 
-    <section id="view"></section>
+    <!-- STEP 2: 範囲選択（全授業 or 授業回） -->
+    <section id="step2" class="card hidden">
+      <h2>② 範囲を選ぶ（全授業 / 授業回指定）</h2>
+      <label><input type="radio" name="range" value="all" checked> 全授業</label>
+      <label><input type="radio" name="range" value="byWeek"> 授業回を指定</label>
+      <div id="weekPicker" class="mt hidden">
+        <select id="weekSelect"></select>
+      </div>
+      <div class="row mt">
+        <button id="toStep3" class="primary">次へ</button>
+        <button class="ghost" data-back="#step1">戻る</button>
+      </div>
+    </section>
+
+    <!-- STEP 3: 出題対象（全問 / 不正解＆未回答） -->
+    <section id="step3" class="card hidden">
+      <h2>③ 出題対象を選ぶ</h2>
+      <label><input type="radio" name="pool" value="all" checked> 全問</label>
+      <label><input type="radio" name="pool" value="wrong_blank"> 不正解＆未回答のみ</label>
+      <div class="row mt">
+        <button id="toStep4" class="primary">次へ</button>
+        <button class="ghost" data-back="#step2">戻る</button>
+      </div>
+    </section>
+
+    <!-- STEP 4: 出題順（順番 / ランダム） -->
+    <section id="step4" class="card hidden">
+      <h2>④ 出題順を選ぶ</h2>
+      <label><input type="radio" name="order" value="seq" checked> 順番</label>
+      <label><input type="radio" name="order" value="shuffle"> ランダム</label>
+      <div class="row mt">
+        <button id="startQuiz" class="primary">クイズ開始</button>
+        <button class="ghost" data-back="#step3">戻る</button>
+      </div>
+    </section>
+
+    <!-- QUIZ -->
+    <section id="quiz" class="card hidden">
+      <div class="row between">
+        <div><b id="subjectLabel"></b> / <span id="rangeLabel"></span></div>
+        <div>正解数: <b id="score">0</b></div>
+      </div>
+      <hr>
+      <div id="qImage" class="mb hidden">
+        <img id="img" alt="" />
+      </div>
+      <div id="qText" class="mb"></div>
+      <input id="answerInput" type="text" placeholder="答えを入力" autocomplete="off">
+      <div class="row mt">
+        <button id="btnAnswer" class="primary">答える</button>
+        <button id="btnSkip" class="ghost">スキップ</button>
+      </div>
+      <div id="feedback" class="mt small"></div>
+      <div class="row mt">
+        <button id="btnNext" class="primary hidden">次の問題へ</button>
+        <button class="ghost" data-back="#step1">終了して科目選択に戻る</button>
+      </div>
+    </section>
+
+    <!-- ローディング -->
+    <section id="loading" class="card hidden">
+      <div>読み込み中...</div>
+    </section>
+
   </main>
-
-  <script src="js/config.js"></script>
-  <script src="js/app.js" defer></script>
+  <script src="app.js"></script>
 </body>
 </html>
