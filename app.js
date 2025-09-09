@@ -286,19 +286,19 @@ $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
 
-  // 入力中 → 答える
-  if (!$("#btnAnswer").classList.contains("hidden")) {
-    $("#btnAnswer").click();
+  // Shift+Enter でスキップ（任意）
+  if (e.shiftKey && state.phase === "answering") {
+    $("#btnSkip").click();
     e.preventDefault();
     return;
   }
 
-  // 採点後 → 次の問題へ
-  if (!$("#btnNext").classList.contains("hidden")) {
-    $("#btnNext").click();
-    e.preventDefault();
-    return;
+  if (state.phase === "answering") {
+    $("#btnAnswer").click();  // 採点
+  } else if (state.phase === "review") {
+    $("#btnNext").click();    // 次の問題へ
   }
+  e.preventDefault();
 });
 
 $("#btnNext").addEventListener("click", ()=>{
