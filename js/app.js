@@ -1,347 +1,241 @@
-// ===================== js/app.js（公開CSV優先 完全版） =====================
-const CFG = window.APP_CONFIG;
-const view = document.getElementById("view");
+/***** 設定 *****/
+const GAS_URL = "https://script.google.com/macros/s/AKfycbx9PKDGh-a5AkeSz5sPlJlCsJZSZGYa7iqCnIcLaCFAk1iHo0mi7T-RlLbZcTzWf9HBJw/exec";
 
-// === 科目クリック ===
-document.querySelector("nav.subjects")?.addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-subject]");
-  if (!btn) return;
-  const key = btn.dataset.subject;
-  const subject = { kokugo: "国語", sansu: "算数", rika: "理科", shakai: "社会" }[key] || key;
-  renderSubjectTop(subject);
-});
+// 科目ごとにシート名とデータ取得先を定義
+// ここは後で実データに合わせて差し替えてください。
+// 例：公開CSV / JSON など。最低限のデモデータも付けておきます。
+const SUBJECTS = {
+  "算数": { sheetName: "算数", source: "data/math.json" },
+  "国語": { sheetName: "国語", source: "data/japanese.json" },
+  "理科": { sheetName: "理科", source: "data/science.json" },
+  "社会": { sheetName: "社会", source: "data/social.json" },
+};
 
-// === 科目トップ（全授業 / 授業を選ぶ） ===
-function renderSubjectTop(subject) {
-  view.innerHTML = `
-    <div class="card">
-      <h2 style="margin-top:0">${subject}</h2>
+/***** 状態 *****/
+const state = {
+  subject: null,
+  sheetName: null,
+  rangeMode: "all",   // all | byWeek
+  week: null,         // 例: "2025-W36"
+  pool: "all",        // all | wrong_blank
+  order: "seq",       // seq | shuffle
+  questions: [],      // 絞り込み後の問題
+  idx: 0,
+  score: 0,
+};
 
-      <div class="tabbar" style="display:flex;gap:8px;margin:8px 0 12px 0">
-        <button class="tab active" data-tab="all">全授業</button>
-        <button class="tab" data-tab="pick">授業を選ぶ</button>
-      </div>
+/***** ツール関数 *****/
+const $ = (sel) => document.querySelector(sel);
+const show = (id) => $(id).classList.remove("hidden");
+const hide = (id) => $(id).classList.add("hidden");
+const setText = (id, text) => ($(id).textContent = text);
 
-      <div id="tabContent"></div>
-
-      <div class="select-row" style="margin-top:12px">
-        <button id="backBtn">戻る</button>
-      </div>
-    </div>
-  `;
-  document.getElementById("backBtn").onclick = () => (view.innerHTML = "");
-
-  renderAllLessonsPane(subject);
-
-  view.querySelectorAll(".tabbar .tab").forEach((b) => {
-    b.onclick = () => {
-      view.querySelectorAll(".tabbar .tab").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      if (b.dataset.tab === "all") renderAllLessonsPane(subject);
-      else renderPickLessonPane(subject);
-    };
-  });
-}
-
-// === CSV URL決定（公開CSV優先） ===
-function getCsvUrl(subject) {
-  if (CFG.SUBJECT_CSV_URLS && CFG.SUBJECT_CSV_URLS[subject]) {
-    return CFG.SUBJECT_CSV_URLS[subject];
+function shuffleInPlace(arr){
+  for (let i=arr.length-1;i>0;i--){
+    const j = (Math.random()* (i+1))|0;
+    [arr[i],arr[j]] = [arr[j],arr[i]];
   }
-  const gid = CFG.SUBJECT_GIDS?.[subject];
-  if (Number.isInteger(gid)) {
-    return `https://docs.google.com/spreadsheets/d/${CFG.SPREADSHEET_ID}/export?format=csv&gid=${gid}`;
-  }
-  throw new Error(`「${subject}」のCSV URL/gidが設定されていません`);
-}
-
-// === 全授業タブ ===
-function renderAllLessonsPane(subject) {
-  const box = document.getElementById("tabContent");
-  box.innerHTML = `
-    <div class="pane">
-      <div class="select-row">
-        <label>出題モード：
-          <select id="filter_all">
-            <option value="all">全問</option>
-            <option value="miss">不正解＆未回答のみ</option>
-          </select>
-        </label>
-        <label>出題順：
-          <select id="order_all">
-            <option value="seq">上から順に</option>
-            <option value="rand">ランダム</option>
-          </select>
-        </label>
-      </div>
-      <div class="select-row">
-        <button id="play_all">プレイする</button>
-      </div>
-    </div>
-  `;
-
-  document.getElementById("play_all").onclick = async () => {
-    const filterMode = document.getElementById("filter_all").value;
-    const orderMode = document.getElementById("order_all").value;
-
-    renderLoading("全授業から読み込み中…");
-    try {
-      const rows = await getRowsForSubject(subject, getCsvUrl(subject));
-      const questions = filterRows(rows, { rangeMode: "all", weekCode: "", filterMode });
-      if (questions.length === 0) return showEmpty(subject);
-      if (orderMode === "rand") shuffleInPlace(questions);
-      startQuiz(subject, questions);
-    } catch (err) {
-      showError(subject, err);
-    }
-  };
-}
-
-// === 授業を選ぶタブ ===
-async function renderPickLessonPane(subject) {
-  const box = document.getElementById("tabContent");
-  box.innerHTML = `
-    <div class="pane">
-      <div class="select-row">
-        <label>授業回（week）：
-          <select id="week_pick"><option>読み込み中…</option></select>
-        </label>
-        <label>出題モード：
-          <select id="filter_pick">
-            <option value="all">全問</option>
-            <option value="miss">不正解＆未回答のみ</option>
-          </select>
-        </label>
-        <label>出題順：
-          <select id="order_pick">
-            <option value="seq">上から順に</option>
-            <option value="rand">ランダム</option>
-          </select>
-        </label>
-      </div>
-      <div class="select-row">
-        <button id="play_pick">プレイする</button>
-      </div>
-    </div>
-  `;
-
-  try {
-    const rows = await getRowsForSubject(subject, getCsvUrl(subject));
-    const weeks = Array.from(
-      new Set(rows.map((r) => String(r[CFG.COLS.week] || "").trim()).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b, "ja"));
-
-    const sel = document.getElementById("week_pick");
-    sel.innerHTML = weeks.length
-      ? weeks.map((w) => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join("")
-      : `<option value="">（授業回が見つかりません）</option>`;
-
-    document.getElementById("play_pick").onclick = () => {
-      const weekCode = sel.value.trim();
-      if (!weekCode) return alert("授業回が選ばれていません");
-
-      const filterMode = document.getElementById("filter_pick").value;
-      const orderMode = document.getElementById("order_pick").value;
-
-      const questions = filterRows(rows, { rangeMode: "week", weekCode, filterMode });
-      if (questions.length === 0) return showEmpty(subject);
-      if (orderMode === "rand") shuffleInPlace(questions);
-      startQuiz(subject, questions);
-    };
-  } catch (err) {
-    showError(subject, err);
-  }
-}
-
-// === CSV/キャッシュ ===
-const SUBJECT_CACHE = new Map();
-async function getRowsForSubject(subject, csvUrl) {
-  if (SUBJECT_CACHE.has(subject)) return SUBJECT_CACHE.get(subject);
-  const rows = await fetchCSV(csvUrl);
-  SUBJECT_CACHE.set(subject, rows);
-  return rows;
-}
-async function fetchCSV(url) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  return parseCSV(text);
-}
-function parseCSV(text) {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  if (lines.length === 0) return [];
-  const header = splitCSVLine(lines[0]);
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw || !raw.trim()) continue;
-    const cols = splitCSVLine(raw);
-    const obj = {};
-    header.forEach((h, idx) => (obj[h] = cols[idx] ?? ""));
-    rows.push(obj);
-  }
-  return rows;
-}
-function splitCSVLine(line) {
-  const out = [];
-  let cur = "", inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQ) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
-        else { inQ = false; }
-      } else cur += ch;
-    } else {
-      if (ch === ",") { out.push(cur); cur = ""; }
-      else if (ch === '"') { inQ = true; }
-      else cur += ch;
-    }
-  }
-  out.push(cur);
-  return out;
-}
-
-// === 絞り込み ===
-function filterRows(rows, { rangeMode, weekCode, filterMode }) {
-  const K = CFG.COLS;
-  const mapped = rows
-    .map((r) => ({
-      id: (r[K.id] ?? "").trim(),
-      week: (r[K.week] ?? "").trim(),
-      question: (r[K.question] ?? "").trim(),
-      answer: (r[K.answer] ?? "").trim(),
-      alt_answers: (r[K.alt] ?? "").trim(),
-      image_url: (r[K.image] ?? "").trim(),
-      flag: String(r[K.flag] ?? "").trim().toUpperCase(),
-    }))
-    .filter((r) => r.id && r.question);
-
-  let arr = mapped;
-  if (rangeMode === "week" && weekCode) arr = arr.filter((r) => r.week === weekCode);
-  if (filterMode === "miss") arr = arr.filter((r) => r.flag === "" || r.flag === "FALSE");
   return arr;
 }
 
-// === 出題 ===
-function startQuiz(subject, questions) {
-  const state = { subject, list: questions, idx: 0, correct: 0, total: questions.length };
-  renderQuestion(state);
-}
-
-function renderQuestion(state) {
-  const q = state.list[state.idx];
-  const remain = `${state.idx + 1} / ${state.total}`;
-  const hasImg = !!q.image_url;
-
-  view.innerHTML = `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <h2 style="margin:0">出題：${state.subject}</h2>
-        <div>進捗：${remain}　正解：<span id="sc">${state.correct}</span></div>
-      </div>
-
-      <p style="margin:.5rem 0 .6rem 0;opacity:.9">[${escapeHtml(q.id)}] ${escapeHtml(q.week)}</p>
-      ${hasImg ? `<div style="margin:8px 0"><img src="${escapeAttr(q.image_url)}" alt="" style="max-width:100%;border-radius:10px"></div>` : ""}
-
-      <div style="white-space:pre-wrap;font-size:18px;margin:8px 0 12px 0">${escapeHtml(q.question)}</div>
-
-      <label style="display:block;margin-top:6px">解答（タイピング）</label>
-      <input id="answerInput" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none"
-             style="width:100%;padding:12px;border-radius:10px;border:1px solid #3a4a7a;background:#0f1730;color:#fff;font-size:18px">
-
-      <div class="select-row">
-        <button id="submitBtn" class="primary">解答する（Enter）</button>
-        <button id="skipBtn" class="ghost">スキップ</button>
-      </div>
-
-      <div id="judgeArea" style="min-height:38px;margin-top:8px"></div>
-      <div style="height:140px"></div>
-    </div>
-  `;
-
-  const input = document.getElementById("answerInput");
-  setTimeout(() => { input.focus(); input.scrollIntoView({ block: "center", behavior: "smooth" }); }, 50);
-
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); onSubmit(state); } });
-  document.getElementById("submitBtn").onclick = () => onSubmit(state);
-  document.getElementById("skipBtn").onclick = () => nextQuestion(state);
-}
-
-function onSubmit(state) {
-  const q = state.list[state.idx];
-  const user = normalize(document.getElementById("answerInput").value);
-  const ans = normalize(q.answer);
-  const alts = splitAlt(q.alt_answers).map(normalize);
-
-  const isCorrect = user !== "" && (user === ans || alts.includes(user));
-
-  recordResult(q.id, isCorrect, state.subject);
-
-  const judge = document.getElementById("judgeArea");
-  if (isCorrect) {
-    state.correct++;
-    judge.innerHTML = `<div style="padding:10px;border-radius:10px;background:#143b22">✅ 正解！　解答：<b>${escapeHtml(q.answer)}</b></div>`;
-  } else {
-    judge.innerHTML = `<div style="padding:10px;border-radius:10px;background:#3b1420">❌ 不正解…　正解：<b>${escapeHtml(q.answer)}</b></div>`;
+// CSVを使うならここをCSVパースに。今はJSON前提（配列）で実装。
+async function fetchQuestions(subjectKey){
+  const src = SUBJECTS[subjectKey].source;
+  try{
+    const res = await fetch(src, {cache:"no-store"});
+    if(!res.ok) throw new Error("failed to load: "+src);
+    const data = await res.json();
+    // 想定スキーマ: {id, week, question, answer, alt_answers, image_url, enabled}
+    return data;
+  }catch(e){
+    console.warn(e);
+    // デモ用ダミーデータ（最小限）
+    return [
+      {id:"G4M00001", week:"2025-W36", question:"3×4の答えは？", answer:"12", alt_answers:"12", image_url:"", enabled:""},
+      {id:"G4M00002", week:"2025-W36", question:"8+2の答えは？",  answer:"10", alt_answers:"10", image_url:"", enabled:"FALSE"},
+      {id:"G4M00003", week:"2025-W37", question:"5+5の答えは？",  answer:"10", alt_answers:"10", image_url:"", enabled:"TRUE"},
+    ];
   }
-  setTimeout(() => nextQuestion(state), 700);
 }
 
-function nextQuestion(state) {
-  state.idx++;
-  if (state.idx >= state.total) return renderResult(state);
-  renderQuestion(state);
+async function setFlag({sheetName, id, result}){
+  const body = JSON.stringify({ sheetName, id, result });
+  const res = await fetch(GAS_URL, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body
+  });
+  return res.json(); // {status, sheet, row, col}
 }
 
-function renderResult(state) {
-  view.innerHTML = `
-    <div class="card">
-      <h2>結果：${state.subject}</h2>
-      <p>正解 ${state.correct} / ${state.total}</p>
-      <div class="select-row">
-        <button class="primary" id="retry">もう一度</button>
-        <button class="ghost" id="back">科目トップへ</button>
-      </div>
-    </div>
-  `;
-  document.getElementById("retry").onclick = () => renderSubjectTop(state.subject);
-  document.getElementById("back").onclick = () => (view.innerHTML = "");
+function normalizeAnswers(row){
+  const base = (row.answer ?? "").toString().trim();
+  const alts = (row.alt_answers ?? "")
+    .toString()
+    .split(/[、,;\/\s]+/)
+    .map(s=>s.trim())
+    .filter(Boolean);
+  const set = new Set([base, ...alts]);
+  return set;
 }
 
-// === GAS記録 ===
-async function recordResult(id, isCorrect, subject) {
-  const payload = { id, result: isCorrect ? "TRUE" : "FALSE", sheetName: subject };
-  const area = document.getElementById("judgeArea"); // 画面下にステータス表示
-  try {
-    const res = await fetch(CFG.GAS_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json().catch(()=> ({}));
-    if (!res.ok || json.status !== 'ok') {
-      const why = json.reason ? `（${json.reason}）` : '';
-      area && (area.innerHTML += `<div style="margin-top:6px;color:#ffb3b3">⚠ 記録エラー${why}</div>`);
-      console.warn('GAS record error', json);
-    } else {
-      area && (area.innerHTML += `<div style="margin-top:6px;opacity:.7">📝 記録OK</div>`);
-      console.log('GAS record ok', json);
+function matchAnswer(row, userInput){
+  const cand = normalizeAnswers(row);
+  return cand.has(userInput.trim());
+}
+
+/***** 画面遷移とイベント *****/
+function go(toId){
+  ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(hide);
+  show(toId);
+}
+
+// STEP1 科目
+$("#step1").addEventListener("click", async (ev)=>{
+  const btn = ev.target.closest("button[data-subject]");
+  if(!btn) return;
+  state.subject = btn.dataset.subject;
+  state.sheetName = SUBJECTS[state.subject].sheetName;
+
+  // データ取得 & 授業回（week）一覧の構築
+  go("#loading");
+  const all = await fetchQuestions(state.subject);
+  state._all = all;
+  const weeks = [...new Set(all.map(r=>r.week).filter(Boolean))].sort();
+  const sel = $("#weekSelect");
+  sel.innerHTML = weeks.map(w=>`<option value="${w}">${w}</option>`).join("");
+  setText("#subjectLabel", state.subject);
+  go("#step2");
+});
+
+// STEP2 範囲
+document.querySelectorAll('input[name="range"]').forEach(r=>{
+  r.addEventListener("change", ()=>{
+    state.rangeMode = r.value;
+    if(state.rangeMode === "byWeek"){
+      show("#weekPicker");
+    }else{
+      hide("#weekPicker");
     }
-  } catch (err) {
-    area && (area.innerHTML += `<div style="margin-top:6px;color:#ffb3b3">⚠ 記録通信失敗：${String(err)}</div>`);
-    console.error("記録通信失敗:", err);
+  });
+});
+$("#toStep3").addEventListener("click", ()=>{
+  state.rangeMode = document.querySelector('input[name="range"]:checked').value;
+  if(state.rangeMode === "byWeek"){
+    state.week = $("#weekSelect").value;
+    setText("#rangeLabel", `授業回: ${state.week}`);
+  }else{
+    state.week = null;
+    setText("#rangeLabel", "全授業");
   }
+  go("#step3");
+});
+document.querySelectorAll('[data-back]').forEach(b=>{
+  b.addEventListener("click", ()=> go(b.dataset.back));
+});
+
+// STEP3 出題対象
+$("#toStep4").addEventListener("click", ()=>{
+  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
+  go("#step4");
+});
+
+// STEP4 出題順
+$("#startQuiz").addEventListener("click", ()=>{
+  state.order = document.querySelector('input[name="order"]:checked').value; // seq | shuffle
+
+  // 絞り込み
+  let rows = state._all.slice();
+  if(state.rangeMode === "byWeek"){
+    rows = rows.filter(r=>r.week === state.week);
+  }
+  if(state.pool === "wrong_blank"){
+    rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
+  }
+
+  // 順序
+  if(state.order === "shuffle") shuffleInPlace(rows);
+
+  state.questions = rows;
+  state.idx = 0;
+  state.score = 0;
+  setText("#score", "0");
+
+  if(rows.length === 0){
+    alert("出題対象が0件です。条件を変えてください。");
+    go("#step3");
+    return;
+  }
+
+  go("#quiz");
+  renderQuestion();
+});
+
+/***** 出題・採点 *****/
+function current(){ return state.questions[state.idx]; }
+
+function renderQuestion(){
+  const row = current();
+  $("#feedback").innerHTML = "";
+  $("#btnNext").classList.add("hidden");
+  $("#answerInput").value = "";
+
+  // 画像
+  if(row.image_url){
+    $("#img").src = row.image_url;
+    $("#qImage").classList.remove("hidden");
+  }else{
+    $("#qImage").classList.add("hidden");
+  }
+
+  // 問題文
+  $("#qText").textContent = row.question ?? "(問題文なし)";
+  $("#answerInput").focus();
 }
-// === ユーティリティ ===
-function renderLoading(text="Loading…"){ view.innerHTML = `<div class="card"><p>${text}</p></div>`; }
-function showEmpty(subject){ view.innerHTML = `<div class="card"><h2>${subject}</h2><p>条件に合う問題が見つかりません。</p><button class="ghost" id="goBack">戻る</button></div>`; document.getElementById("goBack").onclick = () => renderSubjectTop(subject); }
-function showError(subject,err){ view.innerHTML = `<div class="card"><h2>${subject}</h2><p>エラー：${escapeHtml(err.message||err)}</p></div>`; }
-function splitAlt(s){ return s?String(s).split(/[,\u3001，/／\s]+/).filter(Boolean):[]; }
-function normalize(s){ if(s==null)return""; s=String(s).trim(); s=zenkakuToHankaku(s); s=kanaToHiragana(s); return s; }
-function zenkakuToHankaku(str){ return str.replace(/[！-～]/g,s=>String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/　/g," "); }
-function kanaToHiragana(str){ return str.replace(/[ァ-ン]/g,s=>String.fromCharCode(s.charCodeAt(0)-0x60)); }
-function shuffleInPlace(a){ for(let i=a.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]];} }
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
-function escapeAttr(s){ return escapeHtml(s).replace(/"/g,"&quot;"); }
-// =====================================================
+
+async function handleAnswer(kind){
+  const row = current();
+  let resultFlag = "BLANK";
+  let feedbackHtml = "";
+
+  if(kind === "skip"){
+    resultFlag = "BLANK";
+    feedbackHtml = `スキップしました。`;
+  }else{
+    const user = $("#answerInput").value;
+    const ok = matchAnswer(row, user);
+    if(ok){
+      resultFlag = "TRUE";
+      state.score++;
+      setText("#score", String(state.score));
+      feedbackHtml = `⭕ 正解！（答え：${row.answer}）`;
+    }else{
+      resultFlag = "FALSE";
+      feedbackHtml = `❌ 不正解…（正答：${row.answer}）`;
+    }
+  }
+
+  // 書き込み（id / sheetName / result）
+  try{
+    await setFlag({ sheetName: state.sheetName, id: row.id, result: resultFlag });
+  }catch(e){
+    console.warn("GAS書き込み失敗", e);
+  }
+
+  $("#feedback").innerHTML = feedbackHtml;
+  $("#btnNext").classList.remove("hidden");
+}
+
+$("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
+$("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
+$("#answerInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("#btnAnswer").click(); });
+
+$("#btnNext").addEventListener("click", ()=>{
+  state.idx++;
+  if(state.idx >= state.questions.length){
+    alert(`終了！ 正解数：${state.score} / ${state.questions.length}`);
+    go("#step1");
+  }else{
+    renderQuestion();
+  }
+});
