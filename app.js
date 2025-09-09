@@ -137,41 +137,50 @@ function parseGvizJson(text){
   return out;
 }
 /* CSV → 配列（1行目ヘッダを小文字化） */
-function parseCSV(text){
-  text = text.replace(/\r/g, "");
-  const rows = [];
-  let i = 0, field = "", row = [], inQ = false;
+// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ異常も吸収） ===
+function parseGvizJson(text){
+  const m = text.match(/setResponse\(([\s\S]+)\);/);
+  if(!m) return [];
 
-  const pushField = () => { row.push(field); field=""; };
-  const pushRow   = () => { rows.push(row); row=[]; };
+  const data = JSON.parse(m[1]);
+  const table = data.table || {};
+  const hdrCount = table.parsedNumHeaders || 0;
 
-  while(i < text.length){
-    const c = text[i];
-    if(inQ){
-      if(c === '"'){
-        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
-        inQ = false; i++; continue;
-      }
-      field += c; i++; continue;
-    }
-    if(c === '"'){ inQ = true; i++; continue; }
-    if(c === ","){ pushField(); i++; continue; }
-    if(c === "\n"){ pushField(); pushRow(); i++; continue; }
-    field += c; i++;
-  }
-  if(field.length || row.length){ pushField(); pushRow(); }
-  if(rows.length === 0) return [];
+  // 1) 列ラベルを取得し、正規化
+  const rawLabels = (table.cols || []).map(c => (c.label || "").toString().trim().toLowerCase());
 
-  const header = rows[0].map(s => s.toString().trim().toLowerCase());
-  return rows.slice(1)
-    .filter(r => r.some(v => v !== ""))
-    .map(cols => {
-      const obj = {};
-      header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
-      return obj;
+  // 先頭トークンだけ抽出し、想定キーに寄せる
+  const normalizeLabel = (s) => {
+    const tok = (s.split(/\s+/)[0] || "").trim(); // "week g4-c00" -> "week"
+    // ゆるめのマッピング
+    if (/^id$/.test(tok) || /id/.test(tok)) return "id";
+    if (/^week$/.test(tok) || /week|授業回|週|回/.test(tok)) return "week";
+    if (/^question$/.test(tok) || /question|問/.test(tok)) return "question";
+    if (/^answer$/.test(tok) || /answer|答/.test(tok)) return "answer";
+    if (/^alt_answers$/.test(tok) || /alt|別解|許容/.test(tok)) return "alt_answers";
+    if (/^image_url$/.test(tok) || /image|img|画像/.test(tok)) return "image_url";
+    if (/^enabled$/.test(tok) || /enable|有効/.test(tok)) return "enabled";
+    if (/^code$/.test(tok) || /^group$/.test(tok)) return tok;
+    return tok || "col";
+  };
+  let cols = rawLabels.map(normalizeLabel);
+
+  // 2) データ行（GViz がヘッダと判断した行はスキップ）
+  const dataRows = (table.rows || []).slice(hdrCount);
+
+  const out = [];
+  for (const r of dataRows){
+    const obj = {};
+    (r.c || []).forEach((cell, idx) => {
+      const key = cols[idx] || `col${idx}`;
+      let v = cell?.v ?? cell?.f ?? "";
+      // booleanや数値も文字列にそろえる
+      obj[key] = String(v).trim();
     });
+    if (Object.values(obj).some(v => v !== "")) out.push(obj);
+  }
+  return out;
 }
-
 /***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
