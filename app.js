@@ -237,6 +237,9 @@ function renderQuestion(){
 }
 
 async function handleAnswer(kind){
+  // すでに採点済みなら無視（Enter連打防止）
+  if (state.phase !== "answering") return;
+
   const row = current();
   let resultFlag = "BLANK";
   let feedbackHtml = "";
@@ -258,13 +261,21 @@ async function handleAnswer(kind){
     }
   }
 
-  // 書き込み（id / sheetName / result）
+  // 採点後は「次へ」待ちモードに
+  state.phase = "review";
+  $("#feedback").innerHTML = feedbackHtml;
+  $("#btnAnswer").classList.add("hidden");
+  $("#btnAnswer").disabled = true;
+  $("#answerInput").disabled = true;
+  $("#btnNext").classList.remove("hidden");
+
+  // 書き込み
   try{
     await setFlag({ sheetName: state.sheetName, id: row.id, result: resultFlag });
   }catch(e){
     console.warn("GAS書き込み失敗", e);
   }
-
+}
   $("#feedback").innerHTML = feedbackHtml;
   $("#btnNext").classList.remove("hidden");
 }
