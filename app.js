@@ -14,7 +14,7 @@ const state = {
   subject: null,
   sheetName: null,
   rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "g4-c00" / "g4-s00"
+  week: null,         // 例: "g4-s00"
   pool: "all",        // all | wrong_blank
   order: "seq",       // seq | shuffle
   questions: [],
@@ -29,7 +29,6 @@ const $ = (sel) => document.querySelector(sel);
 const show = (id) => $(id).classList.remove("hidden");
 const hide = (id) => $(id).classList.add("hidden");
 const setText = (id, text) => ($(id).textContent = text);
-const trimLower = (v) => (v ?? "").toString().trim().toLowerCase();
 
 function shuffleInPlace(arr){
   for (let i = arr.length - 1; i > 0; i--){
@@ -38,24 +37,91 @@ function shuffleInPlace(arr){
   }
   return arr;
 }
+const trimLower = (v) => (v ?? "").toString().trim().toLowerCase();
+
+/* 全角英数 → 半角（最低限） */
+function toHalfWidth(str){
+  return (str ?? "").replace(/[！-～]/g, s =>
+    String.fromCharCode(s.charCodeAt(0) - 0xFEE0)
+  ).replace(/　/g, " ");
+}
+/* 比較用の正規化 */
+function norm(s){
+  return toHalfWidth(String(s ?? ""))
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /* =========================
-   CSV 取得（安定版）
+   データ取得（GViz → CSV フォールバック）
    ========================= */
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
-  const urlCsv =
+
+  // 1) GViz(JSON)
+  const urlJson =
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
     `?tq=${encodeURIComponent("select *")}` +
-    `&tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+    `&tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+  try{
+    const r = await fetch(urlJson, { cache: "no-store" });
+    const t = await r.text();
+    if (r.ok && !t.startsWith("<!DOCTYPE") && !/Sign in|ログイン/i.test(t)) {
+      const rows = parseGvizJson(t);
+      if (rows.length) return rows;
+    }
+  }catch(e){
+    console.warn("GViz fetch error:", e);
+  }
 
-  const r = await fetch(urlCsv, { cache: "no-store" });
-  if (!r.ok) throw new Error(`fetch failed: ${urlCsv}`);
-  const csv = await r.text();
-  return parseCSV(csv);
+  // 2) CSV（フォールバック）
+  const urlCsv =
+    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+  try{
+    const r2 = await fetch(urlCsv, { cache: "no-store" });
+    if (!r2.ok) throw new Error("CSV fetch failed");
+    const csv = await r2.text();
+    return parseCSV(csv);
+  }catch(e){
+    console.error("CSV fallback error:", e);
+    return [];
+  }
 }
 
-/* === CSV → 行配列（ヘッダは小文字化・余白除去） === */
+/* === GViz JSON → 行配列（ヘッダ欠落にも対応） === */
+function parseGvizJson(text){
+  const m = text.match(/setResponse\(([\s\S]+)\);/);
+  if(!m) return [];
+  const data = JSON.parse(m[1]);
+
+  // 1) ラベル（見出し）
+  let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
+
+  // 2) もし見出しが空なら rows[0] を見出しとして採用
+  if (cols.length === 0 || cols.every(c => c === "")) {
+    const first = data.table.rows?.[0];
+    if (first && first.c) {
+      cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
+      data.table.rows.shift();
+    }
+  }
+
+  // 3) データ行をオブジェクトに
+  const out = [];
+  for (const r of (data.table.rows || [])){
+    const obj = {};
+    (r.c || []).forEach((cell, idx) => {
+      const key = cols[idx] || `col${idx}`;
+      let v = cell?.v ?? cell?.f ?? "";
+      obj[key] = String(v).trim();
+    });
+    if (Object.values(obj).some(v => v !== "")) out.push(obj);
+  }
+  return out;
+}
+
+/* === CSV → 行配列（ヘッダは小文字化） === */
 function parseCSV(text){
   text = text.replace(/\r/g, "");
   const rows = [];
@@ -103,26 +169,28 @@ async function setFlag({sheetName, id, result}){
 
 /***** 採点（alt_answers の | も対応） *****/
 function normalizeAnswers(row){
-  const base = (row.answer ?? "").toString().trim();
-  const alts = (row.alt_answers ?? "")
-    .toString()
-    // 読点・コンマ・セミコロン・スラッシュ・縦棒・空白（半角/全角）で分割
-    .split(/[、,;\/|　\s]+/)
+  const base = norm(row.answer);
+  const alts = norm(row.alt_answers)
+    .split(/[|｜、，,;；\/／\s]+/)   // ← 「|」「｜」も区切りに
     .map(s=>s.trim())
     .filter(Boolean);
   return new Set([base, ...alts]);
 }
 function matchAnswer(row, userInput){
-  return normalizeAnswers(row).has(userInput.trim());
+  return normalizeAnswers(row).has(norm(userInput));
 }
 
 /***** week / code / group を大小文字無視で拾う *****/
-function codeOf(r){
+function getCaseInsensitive(obj, names){
   const map = {};
-  Object.keys(r).forEach(k => map[k.toLowerCase().trim()] = k);
-  const key = map["week"] || map["code"] || map["group"] || map["授業回"] || map["週"] || map["回"];
-  return trimLower(key ? r[key] : "");
+  Object.keys(obj).forEach(k => map[k.toLowerCase().trim()] = k);
+  for (const n of names){
+    const key = map[n];
+    if (key) return obj[key];
+  }
+  return "";
 }
+const codeOf = (r) => trimLower(getCaseInsensitive(r, ["week","code","group","授業回","週","回"]));
 
 /***** 画面遷移 *****/
 function go(toId){
@@ -133,125 +201,108 @@ function go(toId){
 /* =========================
    STEP1 科目選択
    ========================= */
-$("#step1").addEventListener("click", async (ev)=>{
+function onClickStep1(ev){
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
 
-  // 状態リセット
-  state.subject   = btn.dataset.subject;
+  state.subject = btn.dataset.subject;
   state.sheetName = SUBJECTS[state.subject].sheetName;
-  state.rangeMode = "all";
-  state.week      = null;
-  state.pool      = "all";
-  state.order     = "seq";
-  state.questions = [];
-  state.idx       = 0;
-  state.score     = 0;
 
   go("#loading");
 
-  // データ読み込み（CSV固定）
-  const all = await fetchQuestions(state.subject);
-  state._all = all;
+  (async () => {
+    const all = await fetchQuestions(state.subject);
+    state._all = all;
 
-  // 授業回（week/code/group）候補を抽出
-  const weeks = [...new Set(all.map(codeOf).filter(Boolean))];
-  // 文字列として自然に見える順に（a1, a2, a10 の順）※週コードが同一なら1件
-  weeks.sort((a,b)=> a.localeCompare(b, "ja", { numeric:true, sensitivity:"base" }));
+    // 授業回（code/週）候補（重複除去）
+    const weeks = [...new Set(all.map(codeOf).filter(Boolean))].sort();
 
-  const sel = $("#weekSelect");
-  if (sel) {
-    if (weeks.length) {
+    const sel = $("#weekSelect");
+    if (sel) {
       sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
-    } else {
-      sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
+      if (weeks.length === 0) sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
     }
-  }
 
-  // 表示文言
-  setText("#subjectLabel", state.subject);
-  // ラジオ初期化（全授業）
-  const rAll = document.querySelector('input[name="range"][value="all"]');
-  if (rAll) rAll.checked = true;
-  hide("#weekPicker");
-
-  go("#step2");
-});
+    setText("#subjectLabel", state.subject);
+    go("#step2");
+  })();
+}
 
 /* =========================
    STEP2 範囲選択
    ========================= */
-document.querySelectorAll('input[name="range"]').forEach(r=>{
-  r.addEventListener("change", ()=>{
-    state.rangeMode = r.value;
-    if (state.rangeMode === "byWeek") show("#weekPicker");
-    else hide("#weekPicker");
+function wireRangeRadios(){
+  document.querySelectorAll('input[name="range"]').forEach(r=>{
+    r.addEventListener("change", ()=>{
+      state.rangeMode = r.value;
+      if (state.rangeMode === "byWeek") show("#weekPicker");
+      else hide("#weekPicker");
+    });
   });
-});
 
-$("#toStep3").addEventListener("click", ()=>{
-  state.rangeMode = document.querySelector('input[name="range"]:checked').value;
+  $("#toStep3").addEventListener("click", ()=>{
+    state.rangeMode = document.querySelector('input[name="range"]:checked').value;
 
-  if (state.rangeMode === "byWeek") {
-    const sel = $("#weekSelect");
-    state.week = sel ? sel.value : null;
-    setText("#rangeLabel", state.week ? `授業回: ${state.week}` : "授業回を選択");
-  } else {
-    state.week = null;
-    setText("#rangeLabel", "全授業");
-  }
-  go("#step3");
-});
-
-document.querySelectorAll('[data-back]').forEach(b=>{
-  b.addEventListener("click", ()=> go(b.dataset.back));
-});
-
-/* =========================
-   STEP3 出題対象
-   ========================= */
-$("#toStep4").addEventListener("click", ()=>{
-  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
-  go("#step4");
-});
-
-/* =========================
-   STEP4 出題順
-   ========================= */
-$("#startQuiz").addEventListener("click", ()=>{
-  state.order = document.querySelector('input[name="order"]:checked').value;
-
-  // ここでは**並べ替えをしない**（seq はシートの元順のまま）
-  let rows = state._all.slice();
-
-  // 授業回で絞り込み（大小文字・余白無視）
-  if(state.rangeMode === "byWeek"){
-    const target = trimLower(state.week);
-    rows = rows.filter(r => codeOf(r) === target);
-  }
-
-  // 「正解済みを除く」（enabled=TRUE を除外）
-  if(state.pool === "wrong_blank"){
-    rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
-  }
-
-  // シャッフル指定のときだけランダム化
-  if(state.order === "shuffle") shuffleInPlace(rows);
-
-  state.questions = rows;
-  state.idx = 0;
-  state.score = 0;
-  setText("#score", "0");
-
-  if(rows.length === 0){
-    alert("出題対象が0件です。条件を変えてください。");
+    if (state.rangeMode === "byWeek") {
+      const sel = $("#weekSelect");
+      state.week = sel ? sel.value : null;
+      setText("#rangeLabel", state.week ? `授業回: ${state.week}` : "授業回を選択");
+    } else {
+      state.week = null;
+      setText("#rangeLabel", "全授業");
+    }
     go("#step3");
-    return;
-  }
+  });
 
-  go("#quiz");
-  renderQuestion();
-});
+  document.querySelectorAll('[data-back]').forEach(b=>{
+    b.addEventListener("click", ()=> go(b.dataset.back));
+  });
+}
+
+/* =========================
+   STEP3 出題対象 → STEP4 出題順
+   ========================= */
+function wireStep3and4(){
+  $("#toStep4").addEventListener("click", ()=>{
+    state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
+    go("#step4");
+  });
+
+  $("#startQuiz").addEventListener("click", ()=>{
+    state.order = document.querySelector('input[name="order"]:checked').value;
+
+    // シート順を保持（seq）—> 並べ替えしない
+    let rows = state._all.slice();
+
+    // 授業回で絞り込み（大小文字・余白無視）
+    if(state.rangeMode === "byWeek"){
+      const target = trimLower(state.week);
+      rows = rows.filter(r => codeOf(r) === target);
+    }
+
+    // 「正解済みを除く」フィルタ（enabled が TRUE のものを除外）
+    if(state.pool === "wrong_blank"){
+      rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
+    }
+
+    // シャッフル指定時のみランダム化
+    if(state.order === "shuffle") shuffleInPlace(rows);
+
+    state.questions = rows;
+    state.idx = 0;
+    state.score = 0;
+    setText("#score", "0");
+
+    if(rows.length === 0){
+      alert("出題対象が0件です。条件を変えてください。");
+      go("#step3");
+      return;
+    }
+
+    go("#quiz");
+    renderQuestion();
+  });
+}
 
 /***** 出題・採点 *****/
 function current(){ return state.questions[state.idx]; }
@@ -281,8 +332,7 @@ function renderQuestion(){
 }
 
 async function handleAnswer(kind){
-  // すでに採点済みなら無視（Enter連打防止）
-  if (state.phase !== "answering") return;
+  if (state.phase !== "answering") return; // 連打防止
 
   const row = current();
   let resultFlag = "BLANK";
@@ -293,8 +343,7 @@ async function handleAnswer(kind){
     feedbackHtml = `スキップしました。`;
   }else{
     const user = $("#answerInput").value;
-    const ok = matchAnswer(row, user);
-    if(ok){
+    if(matchAnswer(row, user)){
       resultFlag = "TRUE";
       state.score++;
       setText("#score", String(state.score));
@@ -305,7 +354,6 @@ async function handleAnswer(kind){
     }
   }
 
-  // 採点後は「次へ」待ちモードに
   state.phase = "review";
   $("#feedback").innerHTML = feedbackHtml;
   $("#btnAnswer").classList.add("hidden");
@@ -313,7 +361,6 @@ async function handleAnswer(kind){
   $("#answerInput").disabled = true;
   $("#btnNext").classList.remove("hidden");
 
-  // 書き込み（id / sheetName / result）
   try{
     await setFlag({ sheetName: state.sheetName, id: row.id, result: resultFlag });
   }catch(e){
@@ -321,48 +368,58 @@ async function handleAnswer(kind){
   }
 }
 
-$("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
-$("#btnSkip").addEventListener("click",  ()=> handleAnswer("skip"));
+function wireQuizButtons(){
+  $("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
+  $("#btnSkip").addEventListener("click",  ()=> handleAnswer("skip"));
 
-// Enter：採点 → 次へ、Shift+Enter：スキップ
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
+  // Enter：採点 → 次へ、Shift+Enter：スキップ
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
 
-  // Shift+Enter でスキップ
-  if (e.shiftKey && state.phase === "answering") {
-    $("#btnSkip").click();
+    if (e.shiftKey && state.phase === "answering") {
+      $("#btnSkip").click();
+      e.preventDefault();
+      return;
+    }
+
+    if (state.phase === "answering") {
+      $("#btnAnswer").click();     // 採点
+    } else if (state.phase === "review") {
+      $("#btnNext").click();       // 次の問題へ
+    }
     e.preventDefault();
-    return;
-  }
+  });
 
-  if (state.phase === "answering") {
-    $("#btnAnswer").click();  // 採点
-  } else if (state.phase === "review") {
-    $("#btnNext").click();    // 次の問題へ
-  }
-  e.preventDefault();
-});
+  // 次の問題へ
+  $("#btnNext").addEventListener("click", ()=>{
+    state.idx++;
+    if(state.idx >= state.questions.length){
+      alert(`終了！ 正解数：${state.score} / ${state.questions.length}`);
+      go("#step1");
+    }else{
+      renderQuestion();
+    }
+  });
+}
 
-// 次の問題へ
-$("#btnNext").addEventListener("click", ()=>{
-  state.idx++;
-  if(state.idx >= state.questions.length){
-    alert(`終了！ 正解数：${state.score} / ${state.questions.length}`);
-    go("#step1");
-  }else{
-    renderQuestion(); // phase を "answering" に戻す
-  }
-});
-
-/* ===== 初期表示：必ず科目選択から ===== */
+/* ===== 初期化（必ず科目選択に切り替える） ===== */
 function init() {
+  // まず全画面を非表示にしてから STEP1 を表示
   ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(sel=>{
     const n = document.querySelector(sel);
     if (n) n.classList.add("hidden");
   });
   const s1 = document.querySelector("#step1");
   if (s1) s1.classList.remove("hidden");
+
+  // イベント配線（重複登録を避ける）
+  $("#step1")?.addEventListener("click", onClickStep1);
+  wireRangeRadios();
+  wireStep3and4();
+  wireQuizButtons();
 }
+
+// DOM 構築が終わってからイベント登録＆初期表示
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init, { once:true });
 } else {
