@@ -17,3 +17,18 @@ button.ghost{background:transparent;border:1px solid #667; color:#fff}
 #img{max-width:100%;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.3)}
 input[type="text"]{width:100%;padding:12px;border-radius:8px;border:1px solid #445;background:#0f1630;color:#fff;font-size:18px}
 hr{border:none;border-top:1px solid #334}
+/* === 画像サイズ調整 === */
+#qImage {
+  text-align: center;        /* 画像を中央寄せ */
+  max-height: 40vh;          /* セクション全体の高さを制限 */
+  margin-bottom: 12px;
+}
+
+#img {
+  max-width: 100%;           /* 横幅は親要素に収める */
+  max-height: 35vh;          /* 画面高の35%に制限（必ず収まる） */
+  object-fit: contain;       /* 縦横比を維持して収める */
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.3);
+}
+
