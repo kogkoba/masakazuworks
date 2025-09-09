@@ -132,6 +132,12 @@ function go(toId){
 // STEP1 科目選択
 // STEP1 科目選択
 $("#step1").addEventListener("click", async (ev)=>{
+  const all = await fetchQuestions(state.subject);
+console.log("first row:", all[0]);  // ← week のキーがどう出るか確認
+state._all = all;
+
+  
+  
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
   state.subject = btn.dataset.subject;
