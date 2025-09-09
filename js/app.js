@@ -312,18 +312,27 @@ function renderResult(state) {
 // === GAS記録 ===
 async function recordResult(id, isCorrect, subject) {
   const payload = { id, result: isCorrect ? "TRUE" : "FALSE", sheetName: subject };
+  const area = document.getElementById("judgeArea"); // 画面下にステータス表示
   try {
     const res = await fetch(CFG.GAS_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    await res.json().catch(() => ({}));
+    const json = await res.json().catch(()=> ({}));
+    if (!res.ok || json.status !== 'ok') {
+      const why = json.reason ? `（${json.reason}）` : '';
+      area && (area.innerHTML += `<div style="margin-top:6px;color:#ffb3b3">⚠ 記録エラー${why}</div>`);
+      console.warn('GAS record error', json);
+    } else {
+      area && (area.innerHTML += `<div style="margin-top:6px;opacity:.7">📝 記録OK</div>`);
+      console.log('GAS record ok', json);
+    }
   } catch (err) {
-    console.error("記録失敗:", err);
+    area && (area.innerHTML += `<div style="margin-top:6px;color:#ffb3b3">⚠ 記録通信失敗：${String(err)}</div>`);
+    console.error("記録通信失敗:", err);
   }
 }
-
 // === ユーティリティ ===
 function renderLoading(text="Loading…"){ view.innerHTML = `<div class="card"><p>${text}</p></div>`; }
 function showEmpty(subject){ view.innerHTML = `<div class="card"><h2>${subject}</h2><p>条件に合う問題が見つかりません。</p><button class="ghost" id="goBack">戻る</button></div>`; document.getElementById("goBack").onclick = () => renderSubjectTop(subject); }
