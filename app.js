@@ -89,7 +89,13 @@ function parseGvizJson(text){
   try { data = JSON.parse(jsonStr); } catch { return []; }
   if (!data.table || !Array.isArray(data.table.cols)) return [];
 
-  const cols = data.table.cols.map(c => (c.label || "").toString().trim().toLowerCase());
+  const cols = data.table.cols.map(c =>
+  (c.label || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)[0]   // 先頭の単語だけを列名にする（id, week, question, …）
+);
   const out = [];
 
   for (const r of (data.table.rows || [])){
