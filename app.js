@@ -1,15 +1,16 @@
 /***** 設定 *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbx9PKDGh-a5AkeSz5sPlJlCsJZSZGYa7iqCnIcLaCFAk1iHo0mi7T-RlLbZcTzWf9HBJw/exec";
 
-// 科目ごとにシート名とデータ取得先を定義
-// ここは後で実データに合わせて差し替えてください。
-// 例：公開CSV / JSON など。最低限のデモデータも付けておきます。
+// ここを差し替える ↓
+const SHEET_ID = "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA"; // ← 自分のシートIDに
+
 const SUBJECTS = {
-  "算数": { sheetName: "算数", source: "data/math.json" },
-  "国語": { sheetName: "国語", source: "data/japanese.json" },
-  "理科": { sheetName: "理科", source: "data/science.json" },
-  "社会": { sheetName: "社会", source: "data/social.json" },
+  "算数": { sheetName: "算数" },
+  "国語": { sheetName: "国語" },
+  "理科": { sheetName: "理科" },
+  "社会": { sheetName: "社会" },
 };
+
 
 /***** 状態 *****/
 const state = {
@@ -40,20 +41,20 @@ function shuffleInPlace(arr){
 
 // CSVを使うならここをCSVパースに。今はJSON前提（配列）で実装。
 async function fetchQuestions(subjectKey){
-  const src = SUBJECTS[subjectKey].source;
+  const sheetName = SUBJECTS[subjectKey].sheetName;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+
   try{
-    const res = await fetch(src, {cache:"no-store"});
-    if(!res.ok) throw new Error("failed to load: "+src);
-    const data = await res.json();
-    // 想定スキーマ: {id, week, question, answer, alt_answers, image_url, enabled}
-    return data;
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error(`failed: ${url}`);
+    const csv = await res.text();
+    const rows = parseCSV(csv);
+    return rows;
   }catch(e){
     console.warn(e);
-    // デモ用ダミーデータ（最小限）
+    // フォールバック（最低限）
     return [
-      {id:"G4M00001", week:"2025-W36", question:"3×4の答えは？", answer:"12", alt_answers:"12", image_url:"", enabled:""},
-      {id:"G4M00002", week:"2025-W36", question:"8+2の答えは？",  answer:"10", alt_answers:"10", image_url:"", enabled:"FALSE"},
-      {id:"G4M00003", week:"2025-W37", question:"5+5の答えは？",  answer:"10", alt_answers:"10", image_url:"", enabled:"TRUE"},
+      {id:"G4M00001", week:"2025-W36", question:"3×4の答えは？", answer:"12", alt_answers:"12", image_url:"", enabled:""}
     ];
   }
 }
