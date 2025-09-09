@@ -39,16 +39,16 @@ function shuffleInPlace(arr){
   return arr;
 }
 
-// === CSVをシートから読み込む ===
+// === シートから GViz JSON を読み込む ===
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
 
   try{
     const res = await fetch(url, { cache: "no-store" });
     if(!res.ok) throw new Error(`failed: ${url}`);
-    const csv = await res.text();
-    const rows = parseCSV(csv);
+    const text = await res.text();
+    const rows = parseGvizJson(text);  // ← JSON から行配列に変換
     return rows;
   }catch(e){
     console.warn(e);
@@ -58,43 +58,28 @@ async function fetchQuestions(subjectKey){
   }
 }
 
-// === CSVを配列に変換 ===
-function parseCSV(text){
-  text = text.replace(/\r/g, "");
-  const rows = [];
-  let i = 0, field = "", row = [], inQ = false;
+// === GViz JSON を {id, week, question, …} 配列へ変換 ===
+function parseGvizJson(text){
+  // 返り値は "/*O_o*/\ngoogle.visualization.Query.setResponse(<JSON>);" の形
+  const m = text.match(/setResponse\(([\s\S]+)\);/);
+  if(!m) return [];
 
-  const pushField = () => { row.push(field); field=""; };
-  const pushRow   = () => { rows.push(row); row=[]; };
+  const data = JSON.parse(m[1]);
+  const cols = data.table.cols.map(c => (c.label || "").toString().trim().toLowerCase());
+  const out = [];
 
-  while(i < text.length){
-    const c = text[i];
-    if(inQ){
-      if(c === '"'){
-        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
-        inQ = false; i++; continue;
-      }
-      field += c; i++; continue;
-    }
-    if(c === '"'){ inQ = true; i++; continue; }
-    if(c === ","){ pushField(); i++; continue; }
-    if(c === "\n"){ pushField(); pushRow(); i++; continue; }
-    field += c; i++;
-  }
-  if(field.length || row.length){ pushField(); pushRow(); }
-
-  if(rows.length === 0) return [];
-
-  const header = rows[0].map(s => s.trim());
-  return rows.slice(1).filter(r => r.some(v => v !== "")).map(cols => {
+  for (const r of data.table.rows){
     const obj = {};
-    // 見出しを小文字化＋trimしてキーにする
-    header.forEach((h, idx) => {
-      const key = h.toLowerCase().trim();
-      obj[key] = (cols[idx] ?? "").trim();
+    (r.c || []).forEach((cell, idx) => {
+      const key = cols[idx] || `col${idx}`;
+      let v = cell && (cell.v != null ? cell.v : cell.f);
+      if (v == null) v = "";
+      obj[key] = String(v).trim();
     });
-    return obj;
-  });
+    // 空行を除外（どこかに値がある行だけ採用）
+    if (Object.values(obj).some(v => v !== "")) out.push(obj);
+  }
+  return out;
 }
 /***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
