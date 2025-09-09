@@ -401,3 +401,21 @@ $("#btnNext").addEventListener("click", ()=>{
     renderQuestion(); // phase を "answering" に戻す
   }
 });
+/* ===== 初期化（必ず科目選択に切り替える） ===== */
+function init() {
+  // まず全画面を非表示にしてから STEP1 を表示
+  ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(sel=>{
+    const n = document.querySelector(sel);
+    if (n) n.classList.add("hidden");
+  });
+  const s1 = document.querySelector("#step1");
+  if (s1) s1.classList.remove("hidden");
+}
+
+// DOM 構築が終わってからイベント登録＆初期表示
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init, { once:true });
+} else {
+  init();
+}
+
