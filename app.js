@@ -14,7 +14,7 @@ const state = {
   subject: null,
   sheetName: null,
   rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "g4-s00" / "g4-c00" など（小文字で保持）
+  week: null,         // 例: "g4-c00" / "g4-s00"
   pool: "all",        // all | wrong_blank
   order: "seq",       // seq | shuffle
   questions: [],
@@ -29,6 +29,7 @@ const $ = (sel) => document.querySelector(sel);
 const show = (id) => $(id).classList.remove("hidden");
 const hide = (id) => $(id).classList.add("hidden");
 const setText = (id, text) => ($(id).textContent = text);
+const trimLower = (v) => (v ?? "").toString().trim().toLowerCase();
 
 function shuffleInPlace(arr){
   for (let i = arr.length - 1; i > 0; i--){
@@ -37,33 +38,28 @@ function shuffleInPlace(arr){
   }
   return arr;
 }
-const trimLower = (v) => (v ?? "").toString().trim().toLowerCase();
 
 /* =========================
-   データ取得（CSV固定）
+   CSV 取得（安定版）
    ========================= */
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
   const urlCsv =
-    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
+    `?tq=${encodeURIComponent("select *")}` +
+    `&tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
 
-  try{
-    const r = await fetch(urlCsv, { cache: "no-store" });
-    if (!r.ok) throw new Error("CSV fetch failed");
-    const csv = await r.text();
-    return parseCSV(csv);        // 先頭行はヘッダ、小文字化してキー化
-  }catch(e){
-    console.error("CSV fetch error:", e);
-    return [];
-  }
+  const r = await fetch(urlCsv, { cache: "no-store" });
+  if (!r.ok) throw new Error(`fetch failed: ${urlCsv}`);
+  const csv = await r.text();
+  return parseCSV(csv);
 }
 
-/* === CSV → 行配列（ヘッダは小文字化） === */
+/* === CSV → 行配列（ヘッダは小文字化・余白除去） === */
 function parseCSV(text){
   text = text.replace(/\r/g, "");
   const rows = [];
   let i = 0, field = "", row = [], inQ = false;
-
   const pushField = () => { row.push(field); field=""; };
   const pushRow   = () => { rows.push(row); row=[]; };
 
@@ -86,7 +82,7 @@ function parseCSV(text){
 
   const header = rows[0].map(s => s.toString().trim().toLowerCase());
   return rows.slice(1)
-    .filter(r => r.some(v => v !== "")) // 空行除去
+    .filter(r => r.some(v => v !== ""))
     .map(cols => {
       const obj = {};
       header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
@@ -105,12 +101,13 @@ async function setFlag({sheetName, id, result}){
   return res.json(); // {status, sheet, row, col}
 }
 
-/***** 採点（alt_answers の | も対応。完全一致） *****/
+/***** 採点（alt_answers の | も対応） *****/
 function normalizeAnswers(row){
   const base = (row.answer ?? "").toString().trim();
   const alts = (row.alt_answers ?? "")
     .toString()
-    .split(/[|、,;\/\s]+/)   // ← 「|」も区切り
+    // 読点・コンマ・セミコロン・スラッシュ・縦棒・空白（半角/全角）で分割
+    .split(/[、,;\/|　\s]+/)
     .map(s=>s.trim())
     .filter(Boolean);
   return new Set([base, ...alts]);
@@ -119,17 +116,13 @@ function matchAnswer(row, userInput){
   return normalizeAnswers(row).has(userInput.trim());
 }
 
-/***** week / code / group を大小文字無視で拾う（列名ゆらぎ対応） *****/
-function getCaseInsensitive(obj, names){
+/***** week / code / group を大小文字無視で拾う *****/
+function codeOf(r){
   const map = {};
-  Object.keys(obj).forEach(k => map[k.toLowerCase().trim()] = k);
-  for (const n of names){
-    const key = map[n];
-    if (key) return obj[key];
-  }
-  return "";
+  Object.keys(r).forEach(k => map[k.toLowerCase().trim()] = k);
+  const key = map["week"] || map["code"] || map["group"] || map["授業回"] || map["週"] || map["回"];
+  return trimLower(key ? r[key] : "");
 }
-const codeOf = (r) => trimLower(getCaseInsensitive(r, ["week","code","group","授業回","週","回"]));
 
 /***** 画面遷移 *****/
 function go(toId){
@@ -144,8 +137,16 @@ $("#step1").addEventListener("click", async (ev)=>{
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
 
-  state.subject = btn.dataset.subject;
+  // 状態リセット
+  state.subject   = btn.dataset.subject;
   state.sheetName = SUBJECTS[state.subject].sheetName;
+  state.rangeMode = "all";
+  state.week      = null;
+  state.pool      = "all";
+  state.order     = "seq";
+  state.questions = [];
+  state.idx       = 0;
+  state.score     = 0;
 
   go("#loading");
 
@@ -153,21 +154,27 @@ $("#step1").addEventListener("click", async (ev)=>{
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 授業回候補（シート順のままにしたいのでソートしない）
-  const weeksSeen = new Set();
-  const weeks = [];
-  for (const r of all){
-    const c = codeOf(r);
-    if (c && !weeksSeen.has(c)){ weeksSeen.add(c); weeks.push(c); }
-  }
+  // 授業回（week/code/group）候補を抽出
+  const weeks = [...new Set(all.map(codeOf).filter(Boolean))];
+  // 文字列として自然に見える順に（a1, a2, a10 の順）※週コードが同一なら1件
+  weeks.sort((a,b)=> a.localeCompare(b, "ja", { numeric:true, sensitivity:"base" }));
 
   const sel = $("#weekSelect");
   if (sel) {
-    sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
-    if (weeks.length === 0) sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
+    if (weeks.length) {
+      sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
+    } else {
+      sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
+    }
   }
 
+  // 表示文言
   setText("#subjectLabel", state.subject);
+  // ラジオ初期化（全授業）
+  const rAll = document.querySelector('input[name="range"][value="all"]');
+  if (rAll) rAll.checked = true;
+  hide("#weekPicker");
+
   go("#step2");
 });
 
@@ -214,7 +221,7 @@ $("#toStep4").addEventListener("click", ()=>{
 $("#startQuiz").addEventListener("click", ()=>{
   state.order = document.querySelector('input[name="order"]:checked').value;
 
-  // シート順を保つため、ここでは並べ替えない（seq のまま）
+  // ここでは**並べ替えをしない**（seq はシートの元順のまま）
   let rows = state._all.slice();
 
   // 授業回で絞り込み（大小文字・余白無視）
@@ -223,7 +230,7 @@ $("#startQuiz").addEventListener("click", ()=>{
     rows = rows.filter(r => codeOf(r) === target);
   }
 
-  // 「正解済みを除く」フィルタ（enabled が TRUE のものを除外）
+  // 「正解済みを除く」（enabled=TRUE を除外）
   if(state.pool === "wrong_blank"){
     rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
   }
@@ -347,7 +354,7 @@ $("#btnNext").addEventListener("click", ()=>{
   }
 });
 
-/* ===== 初期化（必ず科目選択に切り替える） ===== */
+/* ===== 初期表示：必ず科目選択から ===== */
 function init() {
   ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(sel=>{
     const n = document.querySelector(sel);
