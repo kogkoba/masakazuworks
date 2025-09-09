@@ -25,9 +25,6 @@ const state = {
   score: 0,
   phase: "answering", // "answering"（解答入力中）| "review"（採点後/次待ち）
 };
-
-};
-
 /***** ツール関数 *****/
 const $ = (sel) => document.querySelector(sel);
 const show = (id) => $(id).classList.remove("hidden");
@@ -310,4 +307,3 @@ $("#btnNext").addEventListener("click", ()=>{
     renderQuestion(); // ← ここで phase を "answering" に戻す
   }
 });
-
