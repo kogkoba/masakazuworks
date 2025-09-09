@@ -193,19 +193,33 @@ async function setFlag({sheetName, id, result}){
 }
 
 /***** 採点 *****/
-function normalizeAnswers(row){
-  const base = (row.answer ?? "").toString().trim();
-  const alts = (row.alt_answers ?? "")
-    .toString()
-    .split(/[、,;\/\s]+/)
-    .map(s=>s.trim())
-    .filter(Boolean);
-  return new Set([base, ...alts]);
-}
-function matchAnswer(row, userInput){
-  return normalizeAnswers(row).has(userInput.trim());
+// 比較用の軽い正規化：全角縦棒→半角、全角スペース→半角、連続空白を1つに
+function normalizeForCompare(s){
+  return String(s ?? "")
+    .replace(/｜/g, "|")   // 全角縦棒→半角
+    .replace(/\u3000/g, " ") // 全角スペース→半角
+    .trim()
+    .replace(/\s+/g, " ");   // 連続空白→1空白
 }
 
+// alt_answers を “| , 、 ; /（全角/半角）” で区切る（空白では区切らない！）
+function buildAnswerSet(row){
+  const base = normalizeForCompare(row.answer);
+  const altsRaw = String(row.alt_answers ?? "");
+  const alts = altsRaw
+    .replace(/｜/g, "|") // 全角縦棒の統一
+    .split(/[|,、;／/]+/) // 区切り記号のみで分割（空白は含めない）
+    .map(normalizeForCompare)
+    .filter(Boolean);
+
+  return new Set([base, ...alts]);
+}
+
+function matchAnswer(row, userInput){
+  const set = buildAnswerSet(row);
+  const user = normalizeForCompare(userInput);
+  return set.has(user);
+}
 /***** 授業回コード抽出（week / code / group を自動判定） *****/
 const codeOf = (r) => {
   if (!r) return "";
