@@ -307,6 +307,7 @@ $("#btnNext").addEventListener("click", ()=>{
     alert(`終了！ 正解数：${state.score} / ${state.questions.length}`);
     go("#step1");
   }else{
-    renderQuestion();
+    renderQuestion(); // ← ここで phase を "answering" に戻す
   }
 });
+
