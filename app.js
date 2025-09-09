@@ -1,8 +1,8 @@
 /***** 設定 *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbx9PKDGh-a5AkeSz5sPlJlCsJZSZGYa7iqCnIcLaCFAk1iHo0mi7T-RlLbZcTzWf9HBJw/exec";
 
-// ここを差し替える ↓
-const SHEET_ID = "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA"; // ← 自分のシートIDに
+// あなたのスプレッドシートID
+const SHEET_ID = "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA";
 
 const SUBJECTS = {
   "算数": { sheetName: "算数" },
@@ -10,7 +10,6 @@ const SUBJECTS = {
   "理科": { sheetName: "理科" },
   "社会": { sheetName: "社会" },
 };
-
 
 /***** 状態 *****/
 const state = {
@@ -25,19 +24,22 @@ const state = {
   score: 0,
   phase: "answering", // "answering"（解答入力中）| "review"（採点後/次待ち）
 };
+
 /***** ツール関数 *****/
 const $ = (sel) => document.querySelector(sel);
 const show = (id) => $(id).classList.remove("hidden");
 const hide = (id) => $(id).classList.add("hidden");
 const setText = (id, text) => ($(id).textContent = text);
 
-/***** 状態 *****/
-// … state 定義 …
+function shuffleInPlace(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = (Math.random() * (i + 1)) | 0;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
-/***** ツール関数 *****/
-// … $() / show() / hide() / setText() / shuffleInPlace() …
-
-// === ここに fetchQuestions を置き換え ===
+// === CSVをシートから読み込む ===
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
@@ -46,7 +48,7 @@ async function fetchQuestions(subjectKey){
     const res = await fetch(url, { cache: "no-store" });
     if(!res.ok) throw new Error(`failed: ${url}`);
     const csv = await res.text();
-    const rows = parseCSV(csv);   // ← parseCSVを呼ぶ
+    const rows = parseCSV(csv);
     return rows;
   }catch(e){
     console.warn(e);
@@ -56,7 +58,7 @@ async function fetchQuestions(subjectKey){
   }
 }
 
-// === そのすぐ下に parseCSV を定義 ===
+// === CSVを配列に変換 ===
 function parseCSV(text){
   text = text.replace(/\r/g, "");
   const rows = [];
@@ -90,14 +92,12 @@ function parseCSV(text){
   });
 }
 
-/***** 画面遷移とイベント *****/
-// … STEP1, STEP2 の処理がここから始まる …
-
+/***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
   const res = await fetch(GAS_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" }, // ←ココ！
+    headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
     body
   });
   return res.json(); // {status, sheet, row, col}
@@ -119,20 +119,20 @@ function matchAnswer(row, userInput){
   return cand.has(userInput.trim());
 }
 
-/***** 画面遷移とイベント *****/
+/***** 画面遷移 *****/
 function go(toId){
   ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(hide);
   show(toId);
 }
 
-// STEP1 科目
+// STEP1 科目選択
 $("#step1").addEventListener("click", async (ev)=>{
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
   state.subject = btn.dataset.subject;
   state.sheetName = SUBJECTS[state.subject].sheetName;
 
-  // データ取得 & 授業回（week）一覧の構築
+  // データ取得 & 授業回一覧
   go("#loading");
   const all = await fetchQuestions(state.subject);
   state._all = all;
@@ -143,7 +143,7 @@ $("#step1").addEventListener("click", async (ev)=>{
   go("#step2");
 });
 
-// STEP2 範囲
+// STEP2 範囲選択
 document.querySelectorAll('input[name="range"]').forEach(r=>{
   r.addEventListener("change", ()=>{
     state.rangeMode = r.value;
@@ -273,12 +273,10 @@ async function handleAnswer(kind){
     console.warn("GAS書き込み失敗", e);
   }
 }
-  $("#feedback").innerHTML = feedbackHtml;
-  $("#btnNext").classList.remove("hidden");
-}
 
 $("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
 $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
+
 // エンターキーでの動作を一括管理
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
@@ -298,6 +296,7 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
+// 次の問題へ
 $("#btnNext").addEventListener("click", ()=>{
   state.idx++;
   if(state.idx >= state.questions.length){
