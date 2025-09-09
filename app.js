@@ -62,7 +62,7 @@ async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
   const res = await fetch(GAS_URL, {
     method: "POST",
-    headers: {"Content-Type":"application/json"},
+    headers: { "Content-Type": "text/plain; charset=utf-8" }, // ←ココ！
     body
   });
   return res.json(); // {status, sheet, row, col}
