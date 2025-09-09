@@ -1,7 +1,7 @@
 :root { --bg:#0b1020; --fg:#fff; --card:#121a33; --acc:#4fc3f7; }
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui, sans-serif;background:var(--bg);color:var(--fg)}
-.wrap{max-width:920px;margin:auto;padding:24px}
+.wrap{max-width:940px;margin:auto;padding:24px}
 h1{margin:0 0 16px;font-size:28px}
 nav.subjects{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 20px}
 nav.subjects button{
@@ -10,6 +10,8 @@ nav.subjects button{
 }
 .card{background:var(--card);border-radius:12px;padding:18px}
 .select-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-.select-row select, .select-row button{
+.select-row select,.select-row input,.select-row button{
   padding:10px;border-radius:8px;border:1px solid #444;background:#0f1730;color:#fff
 }
+.tab{padding:10px 14px;border-radius:999px;border:1px solid #3a4a7a;background:transparent;color:#fff}
+.tab.active{background:#1a2447}
