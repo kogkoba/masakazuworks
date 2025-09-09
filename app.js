@@ -263,7 +263,24 @@ async function handleAnswer(kind){
 
 $("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
 $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
-$("#answerInput").addEventListener("keydown", (e)=>{ if(e.key==="Enter") $("#btnAnswer").click(); });
+// エンターキーでの動作を一括管理
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+
+  // 入力中 → 答える
+  if (!$("#btnAnswer").classList.contains("hidden")) {
+    $("#btnAnswer").click();
+    e.preventDefault();
+    return;
+  }
+
+  // 採点後 → 次の問題へ
+  if (!$("#btnNext").classList.contains("hidden")) {
+    $("#btnNext").click();
+    e.preventDefault();
+    return;
+  }
+});
 
 $("#btnNext").addEventListener("click", ()=>{
   state.idx++;
