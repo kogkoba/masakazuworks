@@ -73,21 +73,27 @@ async function fetchQuestions(subjectKey){
   }
 }
 
-// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ欠落も吸収） ===
+// === GViz JSON を {id, week, question, …} 配列へ変換 ===
 function parseGvizJson(text){
   const m = text.match(/setResponse\(([\s\S]+)\);/);
   if(!m) return [];
 
   const data = JSON.parse(m[1]);
 
-  // 見出しを取得。無ければ空になる
+  // ヘッダを抽出
   let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
 
-  // ★ヘッダが無い場合は rows[0] をヘッダ扱いにして削除
+  // ★もし全部空なら、強制的に既知の列を仮定
   if (cols.length === 0 || cols.every(c => c === "")) {
-    const first = data.table.rows?.[0];
-    if (first && first.c) {
-      cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
+    cols = ["id","week","question","answer","alt_answers","image_url","enabled"];
+  }
+
+  // ★1行目が見出しっぽい場合 → ヘッダとして採用し、rowsから削除
+  const firstRow = data.table.rows?.[0];
+  if (firstRow && firstRow.c && firstRow.c.every(cell => typeof (cell?.v) === "string")) {
+    const guess = firstRow.c.map(cell => (cell?.v ?? "").toString().trim().toLowerCase());
+    if (guess.includes("week") || guess.includes("question")) {
+      cols = guess;
       data.table.rows.shift();
     }
   }
@@ -146,7 +152,7 @@ async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
   const res = await fetch(GAS_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
     body
   });
   return res.json();
@@ -166,28 +172,18 @@ function matchAnswer(row, userInput){
   return normalizeAnswers(row).has(userInput.trim());
 }
 
-/***** 授業回コード抽出（week / code / group を自動判定） *****/
+/***** 授業回コード抽出 *****/
 const codeOf = (r) => {
-  const keys = Object.keys(r);
-  // 優先順で探す。似た名前にも対応（例: '授業回', 'Week', 'WEEK'）
-  const pick = (name) => keys.find(k => k.toLowerCase().trim() === name);
-  let key =
-    pick("week")   ||
-    pick("code")   ||
-    pick("group")  ||
-    // 和名対応
-    keys.find(k => ["授業回","週","回"].includes(k.trim()));
-  if (!key) return "";
-  return (r[key] || "").toString().trim().toLowerCase();
+  const keys = Object.keys(r).map(k=>k.toLowerCase().trim());
+  const mapping = ["week","code","group","授業回","週","回"];
+  const found = mapping.find(m => keys.includes(m));
+  if (!found) return "";
+  return (r[found] || "").toString().trim().toLowerCase();
 };
-// コードの自然順ソート（g4-c01 などを grade-subj-num で並べ替え）
 const codeKey = (c)=>{
   const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
   if(!m) return c;
-  const grade = m[1].padStart(2,"0");
-  const subj  = m[2];
-  const num   = m[3].padStart(2,"0");
-  return `${grade}-${subj}-${num}`;
+  return `${m[1].padStart(2,"0")}-${m[2]}-${m[3].padStart(2,"0")}`;
 };
 
 /***** 画面遷移 *****/
@@ -210,7 +206,6 @@ $("#step1").addEventListener("click", async (ev)=>{
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 授業回候補を抽出
   const weeks = [...new Set(all.map(codeOf).filter(Boolean))]
     .sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
 
@@ -254,7 +249,7 @@ document.querySelectorAll('[data-back]').forEach(b=>{
    STEP3 出題対象
    ========================= */
 $("#toStep4").addEventListener("click", ()=>{
-  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
+  state.pool = document.querySelector('input[name="pool"]:checked').value;
   go("#step4");
 });
 
@@ -265,7 +260,6 @@ $("#startQuiz").addEventListener("click", ()=>{
   state.order = document.querySelector('input[name="order"]:checked').value;
 
   let rows = state._all.slice();
-
   if(state.rangeMode === "byWeek"){
     const target = (state.week || "").toLowerCase();
     rows = rows.filter(r => codeOf(r) === target);
@@ -316,7 +310,7 @@ function renderQuestion(){
 }
 
 async function handleAnswer(kind){
-  if (state.phase !== "answering") return; // 連打防止
+  if (state.phase !== "answering") return;
 
   const row = current();
   let resultFlag = "BLANK";
@@ -355,7 +349,6 @@ async function handleAnswer(kind){
 $("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
 $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
 
-// Enter：採点 → 次へ、Shift+Enter：スキップ
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   if (e.shiftKey && state.phase === "answering") { $("#btnSkip").click(); e.preventDefault(); return; }
