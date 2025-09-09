@@ -1,7 +1,5 @@
 /***** 設定 *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbx9PKDGh-a5AkeSz5sPlJlCsJZSZGYa7iqCnIcLaCFAk1iHo0mi7T-RlLbZcTzWf9HBJw/exec";
-
-// 公開済みのスプレッドシートID
 const SHEET_ID = "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA";
 
 const SUBJECTS = {
@@ -16,7 +14,7 @@ const state = {
   subject: null,
   sheetName: null,
   rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "G4-c01"
+  week: null,         // 例: "g4-c01"
   pool: "all",        // all | wrong_blank
   order: "seq",       // seq | shuffle
   questions: [],
@@ -25,7 +23,7 @@ const state = {
   phase: "answering", // answering | review
 };
 
-/***** ツール関数 *****/
+/***** ユーティリティ *****/
 const $ = (sel) => document.querySelector(sel);
 const show = (id) => $(id).classList.remove("hidden");
 const hide = (id) => $(id).classList.add("hidden");
@@ -39,38 +37,43 @@ function shuffleInPlace(arr){
   return arr;
 }
 
-/* =========================================================
-   シートから GViz JSON を読み込む（堅牢版）
-   ========================================================= */
+/* =========================
+   データ取得（GViz → CSV フォールバック）
+   ========================= */
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
-  const url =
+
+  // 1) GViz(JSON)
+  const urlJson =
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
     `?tq=${encodeURIComponent("select *")}` +
     `&tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-
   try{
-    const res = await fetch(url, { cache: "no-store" });
-    const text = await res.text();
-
-    // 非公開/HTMLのとき
-    if (!res.ok || text.startsWith("<!DOCTYPE") || /Sign in|ログイン/i.test(text)) {
-      console.error("GViz fetch failed or sheet not public:", url, text.slice(0,200));
-      return [];
+    const r = await fetch(urlJson, { cache: "no-store" });
+    const t = await r.text();
+    if (r.ok && !t.startsWith("<!DOCTYPE") && !/Sign in|ログイン/i.test(t)) {
+      const rows = parseGvizJson(t);
+      if (rows.length) return rows;
     }
+  }catch(e){
+    console.warn("GViz fetch error:", e);
+  }
 
-    const rows = parseGvizJson(text);
-    if (!rows.length) console.warn("GViz parsed 0 rows:", text.slice(0,200));
+  // 2) CSV（フォールバック）
+  const urlCsv = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+  try{
+    const r2 = await fetch(urlCsv, { cache: "no-store" });
+    if (!r2.ok) throw new Error("CSV fetch failed");
+    const csv = await r2.text();
+    const rows = parseCSV(csv);
     return rows;
   }catch(e){
-    console.error("fetchQuestions error:", e);
+    console.error("CSV fallback error:", e);
     return [];
   }
 }
 
-/* =========================================================
-   GViz JSON → {id, week, question, …} 配列（キーは小文字化）
-   ========================================================= */
+/* GViz JSON → 配列（キー小文字化・trim） */
 function parseGvizJson(text){
   let jsonStr = "";
   const m = text.match(/setResponse\(([\s\S]+)\);?/);
@@ -83,9 +86,7 @@ function parseGvizJson(text){
   if (!jsonStr) return [];
 
   let data;
-  try { data = JSON.parse(jsonStr); }
-  catch { return []; }
-
+  try { data = JSON.parse(jsonStr); } catch { return []; }
   if (!data.table || !Array.isArray(data.table.cols)) return [];
 
   const cols = data.table.cols.map(c => (c.label || "").toString().trim().toLowerCase());
@@ -104,6 +105,42 @@ function parseGvizJson(text){
   return out;
 }
 
+/* CSV → 配列（1行目ヘッダを小文字化） */
+function parseCSV(text){
+  text = text.replace(/\r/g, "");
+  const rows = [];
+  let i = 0, field = "", row = [], inQ = false;
+
+  const pushField = () => { row.push(field); field=""; };
+  const pushRow   = () => { rows.push(row); row=[]; };
+
+  while(i < text.length){
+    const c = text[i];
+    if(inQ){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if(c === '"'){ inQ = true; i++; continue; }
+    if(c === ","){ pushField(); i++; continue; }
+    if(c === "\n"){ pushField(); pushRow(); i++; continue; }
+    field += c; i++;
+  }
+  if(field.length || row.length){ pushField(); pushRow(); }
+  if(rows.length === 0) return [];
+
+  const header = rows[0].map(s => s.toString().trim().toLowerCase());
+  return rows.slice(1)
+    .filter(r => r.some(v => v !== ""))
+    .map(cols => {
+      const obj = {};
+      header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
+      return obj;
+    });
+}
+
 /***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
@@ -112,10 +149,10 @@ async function setFlag({sheetName, id, result}){
     headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
     body
   });
-  return res.json(); // {status, sheet, row, col}
+  return res.json();
 }
 
-/***** 採点ユーティリティ *****/
+/***** 採点 *****/
 function normalizeAnswers(row){
   const base = (row.answer ?? "").toString().trim();
   const alts = (row.alt_answers ?? "")
@@ -129,15 +166,21 @@ function matchAnswer(row, userInput){
   return normalizeAnswers(row).has(userInput.trim());
 }
 
-/***** 画面遷移 *****/
-function go(toId){
-  ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(hide);
-  show(toId);
-}
-
-/***** 授業回コード取得（week/code/group どれでも拾う） *****/
-const codeOf = (r) => (r["week"] || r["code"] || r["group"] || "").toString().trim().toLowerCase();
-// G4-c01 等を grade-subj-num でゼロ埋めして並べ替え安定化
+/***** 授業回コード抽出（week / code / group を自動判定） *****/
+const codeOf = (r) => {
+  const keys = Object.keys(r);
+  // 優先順で探す。似た名前にも対応（例: '授業回', 'Week', 'WEEK'）
+  const pick = (name) => keys.find(k => k.toLowerCase().trim() === name);
+  let key =
+    pick("week")   ||
+    pick("code")   ||
+    pick("group")  ||
+    // 和名対応
+    keys.find(k => ["授業回","週","回"].includes(k.trim()));
+  if (!key) return "";
+  return (r[key] || "").toString().trim().toLowerCase();
+};
+// コードの自然順ソート（g4-c01 などを grade-subj-num で並べ替え）
 const codeKey = (c)=>{
   const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
   if(!m) return c;
@@ -147,9 +190,15 @@ const codeKey = (c)=>{
   return `${grade}-${subj}-${num}`;
 };
 
-/* =========================================================
+/***** 画面遷移 *****/
+function go(toId){
+  ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(hide);
+  show(toId);
+}
+
+/* =========================
    STEP1 科目選択
-   ========================================================= */
+   ========================= */
 $("#step1").addEventListener("click", async (ev)=>{
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
@@ -161,8 +210,9 @@ $("#step1").addEventListener("click", async (ev)=>{
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 授業回（G4-c01 など）候補
-  const weeks = [...new Set(all.map(codeOf).filter(Boolean))].sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
+  // 授業回候補を抽出
+  const weeks = [...new Set(all.map(codeOf).filter(Boolean))]
+    .sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
 
   const sel = $("#weekSelect");
   if (sel) {
@@ -170,13 +220,12 @@ $("#step1").addEventListener("click", async (ev)=>{
     if (weeks.length === 0) sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
   }
   setText("#subjectLabel", state.subject);
-
   go("#step2");
 });
 
-/* =========================================================
+/* =========================
    STEP2 範囲選択
-   ========================================================= */
+   ========================= */
 document.querySelectorAll('input[name="range"]').forEach(r=>{
   r.addEventListener("change", ()=>{
     state.rangeMode = r.value;
@@ -201,33 +250,29 @@ document.querySelectorAll('[data-back]').forEach(b=>{
   b.addEventListener("click", ()=> go(b.dataset.back));
 });
 
-/* =========================================================
+/* =========================
    STEP3 出題対象
-   ========================================================= */
+   ========================= */
 $("#toStep4").addEventListener("click", ()=>{
   state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
   go("#step4");
 });
 
-/* =========================================================
+/* =========================
    STEP4 出題順
-   ========================================================= */
+   ========================= */
 $("#startQuiz").addEventListener("click", ()=>{
   state.order = document.querySelector('input[name="order"]:checked').value;
 
   let rows = state._all.slice();
 
-  // 授業回コードで絞り込み
   if(state.rangeMode === "byWeek"){
     const target = (state.week || "").toLowerCase();
     rows = rows.filter(r => codeOf(r) === target);
   }
-
-  // 不正解・未解答のみ
   if(state.pool === "wrong_blank"){
     rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
   }
-
   if(state.order === "shuffle") shuffleInPlace(rows);
 
   state.questions = rows;
@@ -271,7 +316,7 @@ function renderQuestion(){
 }
 
 async function handleAnswer(kind){
-  if (state.phase !== "answering") return; // Enter連打防止
+  if (state.phase !== "answering") return; // 連打防止
 
   const row = current();
   let resultFlag = "BLANK";
@@ -313,9 +358,7 @@ $("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
 // Enter：採点 → 次へ、Shift+Enter：スキップ
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
-  if (e.shiftKey && state.phase === "answering") {
-    $("#btnSkip").click(); e.preventDefault(); return;
-  }
+  if (e.shiftKey && state.phase === "answering") { $("#btnSkip").click(); e.preventDefault(); return; }
   if (state.phase === "answering") { $("#btnAnswer").click(); }
   else if (state.phase === "review") { $("#btnNext").click(); }
   e.preventDefault();
