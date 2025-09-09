@@ -14,7 +14,7 @@ const state = {
   subject: null,
   sheetName: null,
   rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "g4-s00"
+  week: null,         // 例: "g4-s00" / "g4-c00" など（小文字で保持）
   pool: "all",        // all | wrong_blank
   order: "seq",       // seq | shuffle
   questions: [],
@@ -40,71 +40,22 @@ function shuffleInPlace(arr){
 const trimLower = (v) => (v ?? "").toString().trim().toLowerCase();
 
 /* =========================
-   データ取得（GViz → CSV フォールバック）
+   データ取得（CSV固定）
    ========================= */
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
-
-  // 1) GViz(JSON)
-  const urlJson =
-    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
-    `?tq=${encodeURIComponent("select *")}` +
-    `&tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-  try{
-    const r = await fetch(urlJson, { cache: "no-store" });
-    const t = await r.text();
-    if (r.ok && !t.startsWith("<!DOCTYPE") && !/Sign in|ログイン/i.test(t)) {
-      const rows = parseGvizJson(t);
-      if (rows.length) return rows;
-    }
-  }catch(e){
-    console.warn("GViz fetch error:", e);
-  }
-
-  // 2) CSV（フォールバック）
   const urlCsv =
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+
   try{
-    const r2 = await fetch(urlCsv, { cache: "no-store" });
-    if (!r2.ok) throw new Error("CSV fetch failed");
-    const csv = await r2.text();
-    return parseCSV(csv);
+    const r = await fetch(urlCsv, { cache: "no-store" });
+    if (!r.ok) throw new Error("CSV fetch failed");
+    const csv = await r.text();
+    return parseCSV(csv);        // 先頭行はヘッダ、小文字化してキー化
   }catch(e){
-    console.error("CSV fallback error:", e);
+    console.error("CSV fetch error:", e);
     return [];
   }
-}
-
-// === GViz JSON → 行配列（ヘッダ欠落にも対応） ===
-function parseGvizJson(text){
-  const m = text.match(/setResponse\(([\s\S]+)\);/);
-  if(!m) return [];
-  const data = JSON.parse(m[1]);
-
-  // 1) ヘッダ（label）を取得
-  let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
-
-  // 2) もし全て空欄なら rows[0] をヘッダとして採用（この場合のみ先頭行を除去）
-  if (cols.length === 0 || cols.every(c => c === "")) {
-    const first = data.table.rows?.[0];
-    if (first && first.c) {
-      cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
-      data.table.rows.shift();
-    }
-  }
-
-  // 3) データ行をオブジェクト化
-  const out = [];
-  for (const r of (data.table.rows || [])){
-    const obj = {};
-    (r.c || []).forEach((cell, idx) => {
-      const key = cols[idx] || `col${idx}`;
-      let v = cell?.v ?? cell?.f ?? "";
-      obj[key] = String(v).trim();
-    });
-    if (Object.values(obj).some(v => v !== "")) out.push(obj);
-  }
-  return out;
 }
 
 /* === CSV → 行配列（ヘッダは小文字化） === */
@@ -112,6 +63,7 @@ function parseCSV(text){
   text = text.replace(/\r/g, "");
   const rows = [];
   let i = 0, field = "", row = [], inQ = false;
+
   const pushField = () => { row.push(field); field=""; };
   const pushRow   = () => { rows.push(row); row=[]; };
 
@@ -134,7 +86,7 @@ function parseCSV(text){
 
   const header = rows[0].map(s => s.toString().trim().toLowerCase());
   return rows.slice(1)
-    .filter(r => r.some(v => v !== ""))
+    .filter(r => r.some(v => v !== "")) // 空行除去
     .map(cols => {
       const obj = {};
       header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
@@ -153,12 +105,12 @@ async function setFlag({sheetName, id, result}){
   return res.json(); // {status, sheet, row, col}
 }
 
-/***** 採点（alt_answers の | も対応） *****/
+/***** 採点（alt_answers の | も対応。完全一致） *****/
 function normalizeAnswers(row){
   const base = (row.answer ?? "").toString().trim();
   const alts = (row.alt_answers ?? "")
     .toString()
-    .split(/[、,;\/\s|]+/)   // 「|」も区切り
+    .split(/[|、,;\/\s]+/)   // ← 「|」も区切り
     .map(s=>s.trim())
     .filter(Boolean);
   return new Set([base, ...alts]);
@@ -167,7 +119,7 @@ function matchAnswer(row, userInput){
   return normalizeAnswers(row).has(userInput.trim());
 }
 
-/***** week / code / group を大小文字無視で拾う *****/
+/***** week / code / group を大小文字無視で拾う（列名ゆらぎ対応） *****/
 function getCaseInsensitive(obj, names){
   const map = {};
   Object.keys(obj).forEach(k => map[k.toLowerCase().trim()] = k);
@@ -178,16 +130,6 @@ function getCaseInsensitive(obj, names){
   return "";
 }
 const codeOf = (r) => trimLower(getCaseInsensitive(r, ["week","code","group","授業回","週","回"]));
-
-// 「g4-s00」などを自然順ソート用のキーに（プルダウン並べ替え用）
-const codeKey = (c) => {
-  const m = (c || "").match(/^g(\d+)-([a-z])(\d{1,2})$/i);
-  if(!m) return c || "";
-  const grade = m[1].padStart(2,"0");
-  const subj  = m[2];
-  const num   = m[3].padStart(2,"0");
-  return `${grade}-${subj}-${num}`;
-};
 
 /***** 画面遷移 *****/
 function go(toId){
@@ -207,13 +149,17 @@ $("#step1").addEventListener("click", async (ev)=>{
 
   go("#loading");
 
-  // データ読み込み
+  // データ読み込み（CSV固定）
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 授業回（week/code/group）候補
-  const weeks = [...new Set(all.map(codeOf).filter(Boolean))]
-    .sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
+  // 授業回候補（シート順のままにしたいのでソートしない）
+  const weeksSeen = new Set();
+  const weeks = [];
+  for (const r of all){
+    const c = codeOf(r);
+    if (c && !weeksSeen.has(c)){ weeksSeen.add(c); weeks.push(c); }
+  }
 
   const sel = $("#weekSelect");
   if (sel) {
@@ -223,16 +169,6 @@ $("#step1").addEventListener("click", async (ev)=>{
 
   setText("#subjectLabel", state.subject);
   go("#step2");
-
-  // ← 追加：STEP2に入ったら「全授業」初期化＆週ピッカー隠す
-  (() => {
-    const allRadio = document.querySelector('input[name="range"][value="all"]');
-    if (allRadio) allRadio.checked = true;
-    const picker = document.querySelector("#weekPicker");
-    if (picker) picker.classList.add("hidden");
-    state.rangeMode = "all";
-    state.week = null;
-  })();
 });
 
 /* =========================
@@ -251,12 +187,7 @@ $("#toStep3").addEventListener("click", ()=>{
 
   if (state.rangeMode === "byWeek") {
     const sel = $("#weekSelect");
-    // ← 追加：セレクトが空のときの防御
-    if (!sel || !sel.options || sel.options.length === 0) {
-      alert("授業回がありません。シートの week/code/group 列をご確認ください。");
-      return;
-    }
-    state.week = sel.value || null;
+    state.week = sel ? sel.value : null;
     setText("#rangeLabel", state.week ? `授業回: ${state.week}` : "授業回を選択");
   } else {
     state.week = null;
@@ -283,7 +214,7 @@ $("#toStep4").addEventListener("click", ()=>{
 $("#startQuiz").addEventListener("click", ()=>{
   state.order = document.querySelector('input[name="order"]:checked').value;
 
-  // ここでは**並べ替えをしない**（seq はシート順のまま）
+  // シート順を保つため、ここでは並べ替えない（seq のまま）
   let rows = state._all.slice();
 
   // 授業回で絞り込み（大小文字・余白無視）
@@ -425,8 +356,6 @@ function init() {
   const s1 = document.querySelector("#step1");
   if (s1) s1.classList.remove("hidden");
 }
-
-// DOM 構築が終わってからイベント登録＆初期表示
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init, { once:true });
 } else {
