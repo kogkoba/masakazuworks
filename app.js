@@ -197,18 +197,17 @@ function matchAnswer(row, userInput){
   return normalizeAnswers(row).has(userInput.trim());
 }
 
-/***** 授業回コード抽出 *****/
-const codeOf = (r) => {
-  const keys = Object.keys(r).map(k=>k.toLowerCase().trim());
-  const mapping = ["week","code","group","授業回","週","回"];
-  const found = mapping.find(m => keys.includes(m));
-  if (!found) return "";
-  return (r[found] || "").toString().trim().toLowerCase();
-};
-const codeKey = (c)=>{
-  const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
-  if(!m) return c;
-  return `${m[1].padStart(2,"0")}-${m[2]}-${m[3].padStart(2,"0")}`;
+// 授業回コード抽出（week / code / group / 和名を広く拾う）
+const codeOf = (row) => {
+  // すべてのキーを小文字化して検索
+  const entries = Object.entries(row).map(([k,v])=>[k.toLowerCase().trim(), v]);
+  const prefer = ["week","code","group","授業回","週","回"];
+
+  for (const p of prefer){
+    const hit = entries.find(([k]) => k === p || k.includes(p));
+    if (hit) return String(hit[1] ?? "").trim().toLowerCase();
+  }
+  return "";
 };
 
 /***** 画面遷移 *****/
