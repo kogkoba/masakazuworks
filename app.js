@@ -126,40 +126,71 @@ function go(toId){
 }
 
 // STEP1 科目選択
+// STEP1 科目選択
 $("#step1").addEventListener("click", async (ev)=>{
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
   state.subject = btn.dataset.subject;
   state.sheetName = SUBJECTS[state.subject].sheetName;
 
-  // データ取得 & 授業回一覧
   go("#loading");
+
   const all = await fetchQuestions(state.subject);
   state._all = all;
-  const weeks = [...new Set(all.map(r=>r.week).filter(Boolean))].sort();
+
+  // 週（授業回）候補を作成
+  const weeks = [...new Set(all.map(r => (r.week ?? "").trim()).filter(Boolean))].sort();
+
   const sel = $("#weekSelect");
-  sel.innerHTML = weeks.map(w=>`<option value="${w}">${w}</option>`).join("");
+  const picker = $("#weekPicker");
+  if (!sel)  console.error("#weekSelect が見つかりません");
+  if (!picker) console.error("#weekPicker が見つかりません");
+
+  if (sel) {
+    sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
+    // 何も無ければダミー（空）を1つ
+    if (weeks.length === 0) {
+      sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
+    }
+  }
+
   setText("#subjectLabel", state.subject);
+
+  // byWeek が選ばれているなら、ここで一度表示しておく
+  if (picker) {
+    if (state.rangeMode === "byWeek" && weeks.length > 0) {
+      show("#weekPicker");
+    } else {
+      hide("#weekPicker");
+    }
+  }
+
   go("#step2");
 });
 
-// STEP2 範囲選択
+// STEP2 範囲選択（ラジオの切替で表示/非表示を確実に切り替える）
 document.querySelectorAll('input[name="range"]').forEach(r=>{
   r.addEventListener("change", ()=>{
     state.rangeMode = r.value;
-    if(state.rangeMode === "byWeek"){
+    const picker = $("#weekPicker");
+    if (!picker) return; // 要素が無ければ何もしない
+
+    if (state.rangeMode === "byWeek") {
       show("#weekPicker");
-    }else{
+    } else {
       hide("#weekPicker");
     }
   });
 });
+
 $("#toStep3").addEventListener("click", ()=>{
   state.rangeMode = document.querySelector('input[name="range"]:checked').value;
-  if(state.rangeMode === "byWeek"){
-    state.week = $("#weekSelect").value;
-    setText("#rangeLabel", `授業回: ${state.week}`);
-  }else{
+
+  if (state.rangeMode === "byWeek") {
+    const sel = $("#weekSelect");
+    state.week = sel ? sel.value : null;
+    setText("#rangeLabel", state.week ? `授業回: ${state.week}` : "授業回を選択");
+  } else {
     state.week = null;
     setText("#rangeLabel", "全授業");
   }
