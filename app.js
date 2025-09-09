@@ -73,31 +73,57 @@ async function fetchQuestions(subjectKey){
   }
 }
 
-// === GViz JSON を {id, week, question, …} 配列へ変換 ===
+// === GViz JSON → {id, week, question, …} 配列へ変換（列名を強制正規化） ===
 function parseGvizJson(text){
   const m = text.match(/setResponse\(([\s\S]+)\);/);
   if(!m) return [];
-
   const data = JSON.parse(m[1]);
 
-  // ヘッダを抽出
-  let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
+  // もとのラベル配列
+  let cols = (data.table.cols || []).map(c => (c.label || ""));
 
-  // ★もし全部空なら、強制的に既知の列を仮定
+  // ラベル正規化関数：余計な値が混ざっても既知の列名に寄せる
+  const norm = (h) => {
+    const s = String(h).toLowerCase().trim();
+
+    // まず既知の単語が含まれていたらそれに寄せる
+    if (/\bid\b/.test(s)) return "id";
+    if (/\bweek\b|授業|週|回/.test(s)) return "week";
+    if (/\bquestion\b|問題/.test(s)) return "question";
+    if (/\banswer\b|答え|解答?/.test(s)) return "answer";
+    if (/alt[_\s-]*answers?/.test(s)) return "alt_answers";
+    if (/image[_\s-]*url|画像/.test(s)) return "image_url";
+    if (/\benabled\b|結果|フラグ/.test(s)) return "enabled";
+
+    // 空や未知の場合はそのまま返す（後で補完）
+    return s || "";
+  };
+
+  // ラベルを正規化
+  cols = cols.map(norm);
+
+  // 全部空なら既知の列並びを仮定
   if (cols.length === 0 || cols.every(c => c === "")) {
     cols = ["id","week","question","answer","alt_answers","image_url","enabled"];
   }
 
-  // ★1行目が見出しっぽい場合 → ヘッダとして採用し、rowsから削除
-  const firstRow = data.table.rows?.[0];
-  if (firstRow && firstRow.c && firstRow.c.every(cell => typeof (cell?.v) === "string")) {
-    const guess = firstRow.c.map(cell => (cell?.v ?? "").toString().trim().toLowerCase());
-    if (guess.includes("week") || guess.includes("question")) {
+  // 1行目が“見出し行そのもの”のときは、それを採用
+  const first = data.table.rows?.[0];
+  if (first && first.c) {
+    const guess = first.c.map(cell => (cell?.v ?? cell?.f ?? "")).map(norm);
+    // “week/ question など既知のキーを複数含む”ならヘッダとみなし採用
+    const hit = guess.filter(k => ["id","week","question","answer","alt_answers","image_url","enabled"].includes(k));
+    if (hit.length >= 2) {
       cols = guess;
       data.table.rows.shift();
     }
   }
 
+  // 空の列名は順番で補完
+  const fallback = ["id","week","question","answer","alt_answers","image_url","enabled"];
+  cols = cols.map((c,i)=> c || fallback[i] || `col${i}`);
+
+  // 行をオブジェクト化
   const out = [];
   for (const r of (data.table.rows || [])){
     const obj = {};
@@ -110,7 +136,6 @@ function parseGvizJson(text){
   }
   return out;
 }
-
 /* CSV → 配列（1行目ヘッダを小文字化） */
 function parseCSV(text){
   text = text.replace(/\r/g, "");
