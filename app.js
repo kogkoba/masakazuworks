@@ -102,7 +102,6 @@ function parseGvizJson(text){
       let v = cell?.v ?? cell?.f ?? "";
       obj[key] = String(v).trim();
     });
-    // 空行は捨てる
     if (Object.values(obj).some(v => v !== "")) out.push(obj);
   }
   return out;
@@ -159,7 +158,7 @@ function normalizeAnswers(row){
   const base = (row.answer ?? "").toString().trim();
   const alts = (row.alt_answers ?? "")
     .toString()
-    .split(/[、,;\/\s|]+/)   // ← 「|」も区切りに追加
+    .split(/[、,;\/\s|]+/)   // 「|」も区切り
     .map(s=>s.trim())
     .filter(Boolean);
   return new Set([base, ...alts]);
@@ -180,7 +179,7 @@ function getCaseInsensitive(obj, names){
 }
 const codeOf = (r) => trimLower(getCaseInsensitive(r, ["week","code","group","授業回","週","回"]));
 
-// 「g4-s00」などを自然順ソート用のキーに
+// 「g4-s00」などを自然順ソート用のキーに（プルダウン並べ替え用）
 const codeKey = (c) => {
   const m = (c || "").match(/^g(\d+)-([a-z])(\d{1,2})$/i);
   if(!m) return c || "";
@@ -224,6 +223,16 @@ $("#step1").addEventListener("click", async (ev)=>{
 
   setText("#subjectLabel", state.subject);
   go("#step2");
+
+  // ← 追加：STEP2に入ったら「全授業」初期化＆週ピッカー隠す
+  (() => {
+    const allRadio = document.querySelector('input[name="range"][value="all"]');
+    if (allRadio) allRadio.checked = true;
+    const picker = document.querySelector("#weekPicker");
+    if (picker) picker.classList.add("hidden");
+    state.rangeMode = "all";
+    state.week = null;
+  })();
 });
 
 /* =========================
@@ -242,7 +251,12 @@ $("#toStep3").addEventListener("click", ()=>{
 
   if (state.rangeMode === "byWeek") {
     const sel = $("#weekSelect");
-    state.week = sel ? sel.value : null;
+    // ← 追加：セレクトが空のときの防御
+    if (!sel || !sel.options || sel.options.length === 0) {
+      alert("授業回がありません。シートの week/code/group 列をご確認ください。");
+      return;
+    }
+    state.week = sel.value || null;
     setText("#rangeLabel", state.week ? `授業回: ${state.week}` : "授業回を選択");
   } else {
     state.week = null;
@@ -401,9 +415,9 @@ $("#btnNext").addEventListener("click", ()=>{
     renderQuestion(); // phase を "answering" に戻す
   }
 });
+
 /* ===== 初期化（必ず科目選択に切り替える） ===== */
 function init() {
-  // まず全画面を非表示にしてから STEP1 を表示
   ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(sel=>{
     const n = document.querySelector(sel);
     if (n) n.classList.add("hidden");
@@ -418,4 +432,3 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
-
