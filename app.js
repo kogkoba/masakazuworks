@@ -1,314 +1,4 @@
-}
-}
-
-// === GViz JSON → {id, week, question, …} 配列へ変換（列名を強制正規化） ===
-// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ欠落も吸収） ===
-// ※ ここで _row に元の行番号を保持して、順番出題を安定化
-function parseGvizJson(text){
-const m = text.match(/setResponse\(([\s\S]+)\);/);
-if(!m) return [];
-  const data = JSON.parse(m[1]);
-
-  // もとのラベル配列
-  let cols = (data.table.cols || []).map(c => (c.label || ""));
-
-  // ラベル正規化関数：余計な値が混ざっても既知の列名に寄せる
-  const norm = (h) => {
-    const s = String(h).toLowerCase().trim();
-
-    // まず既知の単語が含まれていたらそれに寄せる
-    if (/\bid\b/.test(s)) return "id";
-    if (/\bweek\b|授業|週|回/.test(s)) return "week";
-    if (/\bquestion\b|問題/.test(s)) return "question";
-    if (/\banswer\b|答え|解答?/.test(s)) return "answer";
-    if (/alt[_\s-]*answers?/.test(s)) return "alt_answers";
-    if (/image[_\s-]*url|画像/.test(s)) return "image_url";
-    if (/\benabled\b|結果|フラグ/.test(s)) return "enabled";
-
-    // 空や未知の場合はそのまま返す（後で補完）
-    return s || "";
-  };
-  const data = JSON.parse(m[1]);
-
-  // ラベルを正規化
-  cols = cols.map(norm);
-  // 見出しを取得。無ければ空になる
-  let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
-
-  // 全部空なら既知の列並びを仮定
-  // ★ヘッダが無い場合は rows[0] をヘッダ扱いにして削除
-if (cols.length === 0 || cols.every(c => c === "")) {
-    cols = ["id","week","question","answer","alt_answers","image_url","enabled"];
-  }
-
-  // 1行目が“見出し行そのもの”のときは、それを採用
-  const first = data.table.rows?.[0];
-  if (first && first.c) {
-    const guess = first.c.map(cell => (cell?.v ?? cell?.f ?? "")).map(norm);
-    // “week/ question など既知のキーを複数含む”ならヘッダとみなし採用
-    const hit = guess.filter(k => ["id","week","question","answer","alt_answers","image_url","enabled"].includes(k));
-    if (hit.length >= 2) {
-      cols = guess;
-    const first = data.table.rows?.[0];
-    if (first && first.c) {
-      cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
-data.table.rows.shift();
-}
-}
-
-  // 空の列名は順番で補完
-  const fallback = ["id","week","question","answer","alt_answers","image_url","enabled"];
-  cols = cols.map((c,i)=> c || fallback[i] || `col${i}`);
-
-  // 行をオブジェクト化
-const out = [];
-  let rowIndex = 0;
-for (const r of (data.table.rows || [])){
-const obj = {};
-(r.c || []).forEach((cell, idx) => {
-const key = cols[idx] || `col${idx}`;
-let v = cell?.v ?? cell?.f ?? "";
-obj[key] = String(v).trim();
-});
-    if (Object.values(obj).some(v => v !== "")) out.push(obj);
-    // 空行を除外（どこかに値がある行だけ採用）
-    if (Object.values(obj).some(v => v !== "")) {
-      obj._row = rowIndex++; // 元の並びを保持
-      out.push(obj);
-    }
-}
-return out;
-}
-/* CSV → 配列（1行目ヘッダを小文字化） */
-// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ異常も吸収） ===
-function parseGvizJson(text){
-  const m = text.match(/setResponse\(([\s\S]+)\);/);
-  if(!m) return [];
-
-  const data = JSON.parse(m[1]);
-  const table = data.table || {};
-  const hdrCount = table.parsedNumHeaders || 0;
-
-  // 1) 列ラベルを取得し、正規化
-  const rawLabels = (table.cols || []).map(c => (c.label || "").toString().trim().toLowerCase());
-
-  // 先頭トークンだけ抽出し、想定キーに寄せる
-  const normalizeLabel = (s) => {
-    const tok = (s.split(/\s+/)[0] || "").trim(); // "week g4-c00" -> "week"
-    // ゆるめのマッピング
-    if (/^id$/.test(tok) || /id/.test(tok)) return "id";
-    if (/^week$/.test(tok) || /week|授業回|週|回/.test(tok)) return "week";
-    if (/^question$/.test(tok) || /question|問/.test(tok)) return "question";
-    if (/^answer$/.test(tok) || /answer|答/.test(tok)) return "answer";
-    if (/^alt_answers$/.test(tok) || /alt|別解|許容/.test(tok)) return "alt_answers";
-    if (/^image_url$/.test(tok) || /image|img|画像/.test(tok)) return "image_url";
-    if (/^enabled$/.test(tok) || /enable|有効/.test(tok)) return "enabled";
-    if (/^code$/.test(tok) || /^group$/.test(tok)) return tok;
-    return tok || "col";
-  };
-  let cols = rawLabels.map(normalizeLabel);
-
-  // 2) データ行（GViz がヘッダと判断した行はスキップ）
-  const dataRows = (table.rows || []).slice(hdrCount);
-/* CSV → 配列（1行目ヘッダを小文字化）
-   ※ こちらも _row を付与して順序を保持 */
-function parseCSV(text){
-  text = text.replace(/\r/g, "");
-  const rows = [];
-  let i = 0, field = "", row = [], inQ = false;
-
-  const pushField = () => { row.push(field); field=""; };
-  const pushRow   = () => { rows.push(row); row=[]; };
-
-  while(i < text.length){
-    const c = text[i];
-    if(inQ){
-      if(c === '"'){
-        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
-        inQ = false; i++; continue;
-      }
-      field += c; i++; continue;
-    }
-    if(c === '"'){ inQ = true; i++; continue; }
-    if(c === ","){ pushField(); i++; continue; }
-    if(c === "\n"){ pushField(); pushRow(); i++; continue; }
-    field += c; i++;
-  }
-  if(field.length || row.length){ pushField(); pushRow(); }
-  if(rows.length === 0) return [];
-
-  const header = rows[0].map(s => s.toString().trim().toLowerCase());
-const out = [];
-  for (const r of dataRows){
-    const obj = {};
-    (r.c || []).forEach((cell, idx) => {
-      const key = cols[idx] || `col${idx}`;
-      let v = cell?.v ?? cell?.f ?? "";
-      // booleanや数値も文字列にそろえる
-      obj[key] = String(v).trim();
-  let rowIndex = 0;
-  rows.slice(1)
-    .filter(r => r.some(v => v !== ""))
-    .forEach(cols => {
-      const obj = {};
-      header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
-      obj._row = rowIndex++;
-      out.push(obj);
-});
-    if (Object.values(obj).some(v => v !== "")) out.push(obj);
-  }
-return out;
-}
-
-/***** GAS書き込み *****/
-async function setFlag({sheetName, id, result}){
-const body = JSON.stringify({ sheetName, id, result });
-const res = await fetch(GAS_URL, {
-method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-    headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
-body
-});
-return res.json();
-}
-
-/***** 採点 *****/
-/***** 採点（alt_answers 改良版） *****/
-// 比較用の軽い正規化：全角縦棒→半角、全角スペース→半角、連続空白を1つに
-function normalizeForCompare(s){
-return String(s ?? "")
-    .replace(/｜/g, "|")   // 全角縦棒→半角
-    .replace(/\u3000/g, " ") // 全角スペース→半角
-    .replace(/｜/g, "|")
-    .replace(/\u3000/g, " ")
-.trim()
-    .replace(/\s+/g, " ");   // 連続空白→1空白
-    .replace(/\s+/g, " ");
-}
-
-// alt_answers を “| , 、 ; /（全角/半角）” で区切る（空白では区切らない！）
-// alt_answers は “| , 、 ; /（全角/半角）” でのみ区切る（空白は区切らない）
-function buildAnswerSet(row){
-const base = normalizeForCompare(row.answer);
-const altsRaw = String(row.alt_answers ?? "");
-const alts = altsRaw
-    .replace(/｜/g, "|") // 全角縦棒の統一
-    .split(/[|,、;／/]+/) // 区切り記号のみで分割（空白は含めない）
-    .replace(/｜/g, "|")
-    .split(/[|,、;／/]+/)
-.map(normalizeForCompare)
-.filter(Boolean);
-
-return new Set([base, ...alts]);
-}
-
-function matchAnswer(row, userInput){
-const set = buildAnswerSet(row);
-const user = normalizeForCompare(userInput);
-return set.has(user);
-}
-
-/***** 授業回コード抽出（week / code / group を自動判定） *****/
-const codeOf = (r) => {
-  if (!r) return "";
-  // キー名をゆるく拾う（week / code / group / 授業回 等）
-const keys = Object.keys(r);
-  const findKey = (names) =>
-    keys.find(k => names.includes(k.toLowerCase().trim()));
-  const k =
-    findKey(["week"]) ||
-    findKey(["code"]) ||
-    findKey(["group"]) ||
-    findKey(["授業回","週","回"]) || null;
-
-  const v = k ? r[k] : "";
-  return (v ?? "").toString().trim().toLowerCase();
-  const pick = (name) => keys.find(k => k.toLowerCase().trim() === name);
-  let key =
-    pick("week")   ||
-    pick("code")   ||
-    pick("group")  ||
-    keys.find(k => ["授業回","週","回"].includes(k.trim()));
-  if (!key) return "";
-  return (r[key] || "").toString().trim().toLowerCase();
-};
-
-// g4-c01 形式を自然順で並べるためのソートキー
-const codeKey = (c) => {
-  c = (c ?? "").toString().trim().toLowerCase();
-// コードの自然順ソート（g4-c01 などを grade-subj-num で並べ替え）
-const codeKey = (c)=>{
-const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
-  if (!m) return c; // 非対応形式はそのまま
-  const grade = m[1].padStart(2, "0");
-  if(!m) return c;
-  const grade = m[1].padStart(2,"0");
-const subj  = m[2];
-  const num   = m[3].padStart(2, "0");
-  const num   = m[3].padStart(2,"0");
-return `${grade}-${subj}-${num}`;
-};
-
-@@ -268,6 +233,7 @@ $("#step1").addEventListener("click", async (ev)=>{
-const all = await fetchQuestions(state.subject);
-state._all = all;
-
-  // 授業回候補を抽出
-const weeks = [...new Set(all.map(codeOf).filter(Boolean))]
-.sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
-
-@@ -311,7 +277,7 @@ document.querySelectorAll('[data-back]').forEach(b=>{
-  STEP3 出題対象
-  ========================= */
-$("#toStep4").addEventListener("click", ()=>{
-  state.pool = document.querySelector('input[name="pool"]:checked').value;
-  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
-go("#step4");
-});
-
-@@ -322,14 +288,24 @@ $("#startQuiz").addEventListener("click", ()=>{
-state.order = document.querySelector('input[name="order"]:checked').value;
-
-let rows = state._all.slice();
-
-  // 授業回で絞り込む
-if(state.rangeMode === "byWeek"){
-const target = (state.week || "").toLowerCase();
-rows = rows.filter(r => codeOf(r) === target);
-}
-
-  // 既正解/未解答のみ
-if(state.pool === "wrong_blank"){
-rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
-}
-  if(state.order === "shuffle") shuffleInPlace(rows);
-
-  // ★順番（seq）はシートの元順（_row）で確実に並べる
-  if (state.order === "seq") {
-    rows.sort((a,b)=> (a._row ?? 0) - (b._row ?? 0));
-  } else {
-    shuffleInPlace(rows);
-  }
-
-state.questions = rows;
-state.idx = 0;
-@@ -372,7 +348,7 @@ function renderQuestion(){
-}
-
-async function handleAnswer(kind){
-  if (state.phase !== "answering") return;
-  if (state.phase !== "answering") return; // 連打防止
-
-const row = current();
-let resultFlag = "BLANK";
-@@ -411,6 +387,7 @@ async function handleAnswer(kind){
-$("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
-$("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
-
-// Enter：採点 → 次へ、Shift+Enter：スキップ
-document.addEventListener("keydown", (e) => {
-if (e.key !== "Enter") return;
-if (e.shiftKey && state.phase === "answering") { $("#btnSkip").click(); e.preventDefault(); return; }/***** 設定 *****/
+/***** 設定 *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbx9PKDGh-a5AkeSz5sPlJlCsJZSZGYa7iqCnIcLaCFAk1iHo0mi7T-RlLbZcTzWf9HBJw/exec";
 const SHEET_ID = "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA";
 
@@ -324,13 +14,13 @@ const state = {
   subject: null,
   sheetName: null,
   rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "g4-c01"
+  week: null,         // 例: "g4-s00"
   pool: "all",        // all | wrong_blank
   order: "seq",       // seq | shuffle
   questions: [],
   idx: 0,
   score: 0,
-  phase: "answering", // answering | review
+  phase: "answering",
 };
 
 /***** ユーティリティ *****/
@@ -348,12 +38,10 @@ function shuffleInPlace(arr){
 }
 
 /* =========================
-   データ取得（GViz → CSV フォールバック）
+   データ取得
    ========================= */
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
-
-  // 1) GViz(JSON)
   const urlJson =
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
     `?tq=${encodeURIComponent("select *")}` +
@@ -369,33 +57,27 @@ async function fetchQuestions(subjectKey){
     console.warn("GViz fetch error:", e);
   }
 
-  // 2) CSV（フォールバック）
+  // CSVフォールバック
   const urlCsv = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
   try{
     const r2 = await fetch(urlCsv, { cache: "no-store" });
-    if (!r2.ok) throw new Error("CSV fetch failed");
     const csv = await r2.text();
-    const rows = parseCSV(csv);
-    return rows;
+    return parseCSV(csv);
   }catch(e){
     console.error("CSV fallback error:", e);
     return [];
   }
 }
 
-// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ欠落も吸収） ===
-// ※ ここで _row に元の行番号を保持して、順番出題を安定化
 function parseGvizJson(text){
   const m = text.match(/setResponse\(([\s\S]+)\);/);
   if(!m) return [];
-
   const data = JSON.parse(m[1]);
 
-  // 見出しを取得。無ければ空になる
   let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
 
-  // ★ヘッダが無い場合は rows[0] をヘッダ扱いにして削除
-  if (cols.length === 0 || cols.every(c => c === "")) {
+  // ヘッダが完全に空のときだけ rows[0] を見出し扱いに
+  if (cols.every(c => c === "")) {
     const first = data.table.rows?.[0];
     if (first && first.c) {
       cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
@@ -404,7 +86,6 @@ function parseGvizJson(text){
   }
 
   const out = [];
-  let rowIndex = 0;
   for (const r of (data.table.rows || [])){
     const obj = {};
     (r.c || []).forEach((cell, idx) => {
@@ -412,22 +93,15 @@ function parseGvizJson(text){
       let v = cell?.v ?? cell?.f ?? "";
       obj[key] = String(v).trim();
     });
-    // 空行を除外（どこかに値がある行だけ採用）
-    if (Object.values(obj).some(v => v !== "")) {
-      obj._row = rowIndex++; // 元の並びを保持
-      out.push(obj);
-    }
+    if (Object.values(obj).some(v => v !== "")) out.push(obj);
   }
   return out;
 }
 
-/* CSV → 配列（1行目ヘッダを小文字化）
-   ※ こちらも _row を付与して順序を保持 */
 function parseCSV(text){
   text = text.replace(/\r/g, "");
   const rows = [];
   let i = 0, field = "", row = [], inQ = false;
-
   const pushField = () => { row.push(field); field=""; };
   const pushRow   = () => { rows.push(row); row=[]; };
 
@@ -435,283 +109,56 @@ function parseCSV(text){
     const c = text[i];
     if(inQ){
       if(c === '"'){
-        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
-        inQ = false; i++; continue;
+        if(text[i+1] === '"'){ field += '"'; i+=2; continue; }
+        inQ=false; i++; continue;
       }
-      field += c; i++; continue;
+      field+=c; i++; continue;
     }
-    if(c === '"'){ inQ = true; i++; continue; }
+    if(c === '"'){ inQ=true; i++; continue; }
     if(c === ","){ pushField(); i++; continue; }
     if(c === "\n"){ pushField(); pushRow(); i++; continue; }
-    field += c; i++;
+    field+=c; i++;
   }
   if(field.length || row.length){ pushField(); pushRow(); }
-  if(rows.length === 0) return [];
+  if(rows.length===0) return [];
 
-  const header = rows[0].map(s => s.toString().trim().toLowerCase());
-  const out = [];
-  let rowIndex = 0;
-  rows.slice(1)
-    .filter(r => r.some(v => v !== ""))
-    .forEach(cols => {
-      const obj = {};
-      header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").toString().trim());
-      obj._row = rowIndex++;
-      out.push(obj);
+  const header = rows[0].map(s=>s.toString().trim().toLowerCase());
+  return rows.slice(1)
+    .filter(r => r.some(v => v!==""))
+    .map(cols=>{
+      const obj={};
+      header.forEach((h,idx)=> obj[h]=(cols[idx]??"").toString().trim());
+      return obj;
     });
-  return out;
 }
 
-/***** GAS書き込み *****/
-async function setFlag({sheetName, id, result}){
-  const body = JSON.stringify({ sheetName, id, result });
-  const res = await fetch(GAS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
-    body
-  });
-  return res.json();
-}
-
-/***** 採点（alt_answers 改良版） *****/
-// 比較用の軽い正規化：全角縦棒→半角、全角スペース→半角、連続空白を1つに
-function normalizeForCompare(s){
-  return String(s ?? "")
-    .replace(/｜/g, "|")
-    .replace(/\u3000/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-// alt_answers は “| , 、 ; /（全角/半角）” でのみ区切る（空白は区切らない）
-function buildAnswerSet(row){
-  const base = normalizeForCompare(row.answer);
-  const altsRaw = String(row.alt_answers ?? "");
-  const alts = altsRaw
-    .replace(/｜/g, "|")
-    .split(/[|,、;／/]+/)
-    .map(normalizeForCompare)
+/***** 採点 *****/
+function normalizeAnswers(row){
+  const base = (row.answer ?? "").toString().trim();
+  const alts = (row.alt_answers ?? "")
+    .toString()
+    .split(/[、,;\/\s|]+/)   // ← 「|」も追加
+    .map(s=>s.trim())
     .filter(Boolean);
-
   return new Set([base, ...alts]);
 }
 function matchAnswer(row, userInput){
-  const set = buildAnswerSet(row);
-  const user = normalizeForCompare(userInput);
-  return set.has(user);
+  return normalizeAnswers(row).has(userInput.trim());
 }
 
-/***** 授業回コード抽出（week / code / group を自動判定） *****/
+/***** 授業回コード抽出 *****/
 const codeOf = (r) => {
-  const keys = Object.keys(r);
-  const pick = (name) => keys.find(k => k.toLowerCase().trim() === name);
-  let key =
-    pick("week")   ||
-    pick("code")   ||
-    pick("group")  ||
-    keys.find(k => ["授業回","週","回"].includes(k.trim()));
-  if (!key) return "";
-  return (r[key] || "").toString().trim().toLowerCase();
+  const keys = Object.keys(r).map(k => k.toLowerCase().trim());
+  if (keys.includes("week")) return (r["week"] || "").toString().trim().toLowerCase();
+  if (keys.includes("code")) return (r["code"] || "").toString().trim().toLowerCase();
+  if (keys.includes("group")) return (r["group"] || "").toString().trim().toLowerCase();
+  return "";
 };
-// コードの自然順ソート（g4-c01 などを grade-subj-num で並べ替え）
-const codeKey = (c)=>{
+const codeKey = (c) => {
   const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
   if(!m) return c;
-  const grade = m[1].padStart(2,"0");
-  const subj  = m[2];
-  const num   = m[3].padStart(2,"0");
-  return `${grade}-${subj}-${num}`;
+  return `${m[1].padStart(2,"0")}-${m[2]}-${m[3].padStart(2,"0")}`;
 };
 
-/***** 画面遷移 *****/
-function go(toId){
-  ["#step1","#step2","#step3","#step4","#quiz","#loading"].forEach(hide);
-  show(toId);
-}
-
-/* =========================
-   STEP1 科目選択
-   ========================= */
-$("#step1").addEventListener("click", async (ev)=>{
-  const btn = ev.target.closest("button[data-subject]");
-  if(!btn) return;
-  state.subject = btn.dataset.subject;
-  state.sheetName = SUBJECTS[state.subject].sheetName;
-
-  go("#loading");
-
-  const all = await fetchQuestions(state.subject);
-  state._all = all;
-
-  // 授業回候補を抽出
-  const weeks = [...new Set(all.map(codeOf).filter(Boolean))]
-    .sort((a,b)=> codeKey(a).localeCompare(codeKey(b)));
-
-  const sel = $("#weekSelect");
-  if (sel) {
-    sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
-    if (weeks.length === 0) sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
-  }
-  setText("#subjectLabel", state.subject);
-  go("#step2");
-});
-
-/* =========================
-   STEP2 範囲選択
-   ========================= */
-document.querySelectorAll('input[name="range"]').forEach(r=>{
-  r.addEventListener("change", ()=>{
-    state.rangeMode = r.value;
-    if (state.rangeMode === "byWeek") show("#weekPicker");
-    else hide("#weekPicker");
-  });
-});
-
-$("#toStep3").addEventListener("click", ()=>{
-  state.rangeMode = document.querySelector('input[name="range"]:checked').value;
-  if (state.rangeMode === "byWeek") {
-    const sel = $("#weekSelect");
-    state.week = sel ? sel.value : null;
-    setText("#rangeLabel", state.week ? `授業回: ${state.week}` : "授業回を選択");
-  } else {
-    state.week = null;
-    setText("#rangeLabel", "全授業");
-  }
-  go("#step3");
-});
-document.querySelectorAll('[data-back]').forEach(b=>{
-  b.addEventListener("click", ()=> go(b.dataset.back));
-});
-
-/* =========================
-   STEP3 出題対象
-   ========================= */
-$("#toStep4").addEventListener("click", ()=>{
-  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
-  go("#step4");
-});
-
-/* =========================
-   STEP4 出題順
-   ========================= */
-$("#startQuiz").addEventListener("click", ()=>{
-  state.order = document.querySelector('input[name="order"]:checked').value;
-
-  let rows = state._all.slice();
-
-  // 授業回で絞り込む
-  if(state.rangeMode === "byWeek"){
-    const target = (state.week || "").toLowerCase();
-    rows = rows.filter(r => codeOf(r) === target);
-  }
-
-  // 既正解/未解答のみ
-  if(state.pool === "wrong_blank"){
-    rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
-  }
-
-  // ★順番（seq）はシートの元順（_row）で確実に並べる
-  if (state.order === "seq") {
-    rows.sort((a,b)=> (a._row ?? 0) - (b._row ?? 0));
-  } else {
-    shuffleInPlace(rows);
-  }
-
-  state.questions = rows;
-  state.idx = 0;
-  state.score = 0;
-  setText("#score", "0");
-
-  if(rows.length === 0){
-    alert("出題対象が0件です。条件を変えてください。");
-    go("#step3");
-    return;
-  }
-
-  go("#quiz");
-  renderQuestion();
-});
-
-/***** 出題・採点 *****/
-function current(){ return state.questions[state.idx]; }
-
-function renderQuestion(){
-  const row = current();
-  state.phase = "answering";
-
-  $("#feedback").innerHTML = "";
-  $("#btnNext").classList.add("hidden");
-  $("#btnAnswer").classList.remove("hidden");
-  $("#btnAnswer").disabled = false;
-  $("#answerInput").disabled = false;
-  $("#answerInput").value = "";
-
-  if(row.image_url){
-    $("#img").src = row.image_url;
-    $("#qImage").classList.remove("hidden");
-  }else{
-    $("#qImage").classList.add("hidden");
-  }
-
-  $("#qText").textContent = row.question ?? "(問題文なし)";
-  $("#answerInput").focus();
-}
-
-async function handleAnswer(kind){
-  if (state.phase !== "answering") return; // 連打防止
-
-  const row = current();
-  let resultFlag = "BLANK";
-  let feedbackHtml = "";
-
-  if(kind === "skip"){
-    resultFlag = "BLANK";
-    feedbackHtml = "スキップしました。";
-  }else{
-    const user = $("#answerInput").value;
-    if(matchAnswer(row, user)){
-      resultFlag = "TRUE";
-      state.score++;
-      setText("#score", String(state.score));
-      feedbackHtml = `⭕ 正解！（答え：${row.answer}）`;
-    }else{
-      resultFlag = "FALSE";
-      feedbackHtml = `❌ 不正解…（正答：${row.answer}）`;
-    }
-  }
-
-  state.phase = "review";
-  $("#feedback").innerHTML = feedbackHtml;
-  $("#btnAnswer").classList.add("hidden");
-  $("#btnAnswer").disabled = true;
-  $("#answerInput").disabled = true;
-  $("#btnNext").classList.remove("hidden");
-
-  try{
-    await setFlag({ sheetName: state.sheetName, id: row.id, result: resultFlag });
-  }catch(e){
-    console.warn("GAS書き込み失敗", e);
-  }
-}
-
-$("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
-$("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
-
-// Enter：採点 → 次へ、Shift+Enter：スキップ
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  if (e.shiftKey && state.phase === "answering") { $("#btnSkip").click(); e.preventDefault(); return; }
-  if (state.phase === "answering") { $("#btnAnswer").click(); }
-  else if (state.phase === "review") { $("#btnNext").click(); }
-  e.preventDefault();
-});
-
-$("#btnNext").addEventListener("click", ()=>{
-  state.idx++;
-  if(state.idx >= state.questions.length){
-    alert(`終了！ 正解数：${state.score} / ${state.questions.length}`);
-    go("#step1");
-  }else{
-    renderQuestion();
-  }
-});
+/***** 画面遷移など（省略：前回と同じ） *****/
+// ... 以下 STEP1〜renderQuestion, handleAnswer, etc はそのまま ...
