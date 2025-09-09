@@ -206,17 +206,32 @@ function matchAnswer(row, userInput){
   return normalizeAnswers(row).has(userInput.trim());
 }
 
-// 授業回コード抽出（week / code / group / 和名を広く拾う）
-const codeOf = (row) => {
-  // すべてのキーを小文字化して検索
-  const entries = Object.entries(row).map(([k,v])=>[k.toLowerCase().trim(), v]);
-  const prefer = ["week","code","group","授業回","週","回"];
+/***** 授業回コード抽出（week / code / group を自動判定） *****/
+const codeOf = (r) => {
+  if (!r) return "";
+  // キー名をゆるく拾う（week / code / group / 授業回 等）
+  const keys = Object.keys(r);
+  const findKey = (names) =>
+    keys.find(k => names.includes(k.toLowerCase().trim()));
+  const k =
+    findKey(["week"]) ||
+    findKey(["code"]) ||
+    findKey(["group"]) ||
+    findKey(["授業回","週","回"]) || null;
 
-  for (const p of prefer){
-    const hit = entries.find(([k]) => k === p || k.includes(p));
-    if (hit) return String(hit[1] ?? "").trim().toLowerCase();
-  }
-  return "";
+  const v = k ? r[k] : "";
+  return (v ?? "").toString().trim().toLowerCase();
+};
+
+// g4-c01 形式を自然順で並べるためのソートキー
+const codeKey = (c) => {
+  c = (c ?? "").toString().trim().toLowerCase();
+  const m = c.match(/^g(\d+)-([a-z])(\d{1,2})$/i);
+  if (!m) return c; // 非対応形式はそのまま
+  const grade = m[1].padStart(2, "0");
+  const subj  = m[2];
+  const num   = m[3].padStart(2, "0");
+  return `${grade}-${subj}-${num}`;
 };
 
 /***** 画面遷移 *****/
