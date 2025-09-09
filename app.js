@@ -73,37 +73,31 @@ async function fetchQuestions(subjectKey){
   }
 }
 
-/* GViz JSON → 配列（キー小文字化・trim） */
+// === GViz JSON を {id, week, question, …} 配列へ変換（ヘッダ欠落も吸収） ===
 function parseGvizJson(text){
-  let jsonStr = "";
-  const m = text.match(/setResponse\(([\s\S]+)\);?/);
-  if (m) jsonStr = m[1];
-  else {
-    const s = text.indexOf("{");
-    const e = text.lastIndexOf("}");
-    if (s !== -1 && e !== -1 && e > s) jsonStr = text.slice(s, e + 1);
+  const m = text.match(/setResponse\(([\s\S]+)\);/);
+  if(!m) return [];
+
+  const data = JSON.parse(m[1]);
+
+  // 見出しを取得。無ければ空になる
+  let cols = (data.table.cols || []).map(c => (c.label || "").trim().toLowerCase());
+
+  // ★ヘッダが無い場合は rows[0] をヘッダ扱いにして削除
+  if (cols.length === 0 || cols.every(c => c === "")) {
+    const first = data.table.rows?.[0];
+    if (first && first.c) {
+      cols = first.c.map(cell => (cell?.v ?? cell?.f ?? "").toString().trim().toLowerCase());
+      data.table.rows.shift();
+    }
   }
-  if (!jsonStr) return [];
 
-  let data;
-  try { data = JSON.parse(jsonStr); } catch { return []; }
-  if (!data.table || !Array.isArray(data.table.cols)) return [];
-
-  const cols = data.table.cols.map(c =>
-  (c.label || "")
-    .toString()
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)[0]   // 先頭の単語だけを列名にする（id, week, question, …）
-);
   const out = [];
-
   for (const r of (data.table.rows || [])){
     const obj = {};
     (r.c || []).forEach((cell, idx) => {
       const key = cols[idx] || `col${idx}`;
-      let v = cell && (cell.v != null ? cell.v : cell.f);
-      if (v == null) v = "";
+      let v = cell?.v ?? cell?.f ?? "";
       obj[key] = String(v).trim();
     });
     if (Object.values(obj).some(v => v !== "")) out.push(obj);
