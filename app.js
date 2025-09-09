@@ -15,14 +15,14 @@ const SUBJECTS = {
 const state = {
   subject: null,
   sheetName: null,
-  rangeMode: "all",   // all | byWeek
-  week: null,         // 例: "2025-W36"
-  pool: "all",        // all | wrong_blank
-  order: "seq",       // seq | shuffle
-  questions: [],      // 絞り込み後の問題
+  rangeMode: "all",
+  week: null,
+  pool: "all",
+  order: "seq",
+  questions: [],
   idx: 0,
   score: 0,
-  phase: "answering", // "answering"（解答入力中）| "review"（採点後/次待ち）
+  phase: "answering",
 };
 
 /***** ツール関数 *****/
@@ -39,35 +39,30 @@ function shuffleInPlace(arr){
   return arr;
 }
 
-// === シートから GViz JSON を読み込む ===
+// === GViz JSON 読み込み ===
 async function fetchQuestions(subjectKey){
   const sheetName = SUBJECTS[subjectKey].sheetName;
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-
   try{
     const res = await fetch(url, { cache: "no-store" });
     if(!res.ok) throw new Error(`failed: ${url}`);
     const text = await res.text();
-    const rows = parseGvizJson(text);  // ← JSON から行配列に変換
-    return rows;
+    return parseGvizJson(text);
   }catch(e){
     console.warn(e);
     return [
-      {id:"G4M00001", week:"2025-W36", question:"3×4の答えは？", answer:"12", alt_answers:"12", image_url:"", enabled:""}
+      {id:"demo1", week:"demo", question:"3×4=?", answer:"12", alt_answers:"12", image_url:"", enabled:""}
     ];
   }
 }
 
-// === GViz JSON を {id, week, question, …} 配列へ変換 ===
+// === GViz JSON パース ===
 function parseGvizJson(text){
-  // 返り値は "/*O_o*/\ngoogle.visualization.Query.setResponse(<JSON>);" の形
   const m = text.match(/setResponse\(([\s\S]+)\);/);
   if(!m) return [];
-
   const data = JSON.parse(m[1]);
   const cols = data.table.cols.map(c => (c.label || "").toString().trim().toLowerCase());
   const out = [];
-
   for (const r of data.table.rows){
     const obj = {};
     (r.c || []).forEach((cell, idx) => {
@@ -76,20 +71,20 @@ function parseGvizJson(text){
       if (v == null) v = "";
       obj[key] = String(v).trim();
     });
-    // 空行を除外（どこかに値がある行だけ採用）
     if (Object.values(obj).some(v => v !== "")) out.push(obj);
   }
   return out;
 }
+
 /***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
   const body = JSON.stringify({ sheetName, id, result });
   const res = await fetch(GAS_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" }, // プリフライト回避
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
     body
   });
-  return res.json(); // {status, sheet, row, col}
+  return res.json();
 }
 
 function normalizeAnswers(row){
@@ -99,13 +94,10 @@ function normalizeAnswers(row){
     .split(/[、,;\/\s]+/)
     .map(s=>s.trim())
     .filter(Boolean);
-  const set = new Set([base, ...alts]);
-  return set;
+  return new Set([base, ...alts]);
 }
-
 function matchAnswer(row, userInput){
-  const cand = normalizeAnswers(row);
-  return cand.has(userInput.trim());
+  return normalizeAnswers(row).has(userInput.trim());
 }
 
 /***** 画面遷移 *****/
@@ -122,62 +114,32 @@ $("#step1").addEventListener("click", async (ev)=>{
   state.sheetName = SUBJECTS[state.subject].sheetName;
 
   go("#loading");
-
-  // ← ここでデータ取得
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 🔍 デバッグログはココに入れる（必要なときだけ）
-  console.log("first row:", all[0]);               // 1行目の中身を確認（weekキーが見えるはず）
-  console.log("keys:", Object.keys(all[0] || {})); // 取れているキー名一覧
-
-  // 週（授業回）候補を作成（r.week → r["week"] にして安全に）
-  const weeks = [...new Set(
-    all.map(r => (r["week"] || "").trim()).filter(Boolean)
-  )].sort();
-
+  // 授業回（week列）
+  const weeks = [...new Set(all.map(r => (r["week"] || "").trim()).filter(Boolean))].sort();
   const sel = $("#weekSelect");
-  const picker = $("#weekPicker");
-  if (!sel)    console.error("#weekSelect が見つかりません");
-  if (!picker) console.error("#weekPicker が見つかりません");
-
-  if (sel) {
+  if(sel){
     sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
-    if (weeks.length === 0) {
+    if(weeks.length === 0){
       sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
     }
   }
-
   setText("#subjectLabel", state.subject);
-
-  if (picker) {
-    if (state.rangeMode === "byWeek" && weeks.length > 0) {
-      show("#weekPicker");
-    } else {
-      hide("#weekPicker");
-    }
-  }
-
   go("#step2");
 });
-// STEP2 範囲選択（ラジオの切替で表示/非表示を確実に切り替える）
+
+// STEP2 範囲
 document.querySelectorAll('input[name="range"]').forEach(r=>{
   r.addEventListener("change", ()=>{
     state.rangeMode = r.value;
-    const picker = $("#weekPicker");
-    if (!picker) return; // 要素が無ければ何もしない
-
-    if (state.rangeMode === "byWeek") {
-      show("#weekPicker");
-    } else {
-      hide("#weekPicker");
-    }
+    if (state.rangeMode === "byWeek") show("#weekPicker");
+    else hide("#weekPicker");
   });
 });
-
 $("#toStep3").addEventListener("click", ()=>{
   state.rangeMode = document.querySelector('input[name="range"]:checked').value;
-
   if (state.rangeMode === "byWeek") {
     const sel = $("#weekSelect");
     state.week = sel ? sel.value : null;
@@ -194,138 +156,96 @@ document.querySelectorAll('[data-back]').forEach(b=>{
 
 // STEP3 出題対象
 $("#toStep4").addEventListener("click", ()=>{
-  state.pool = document.querySelector('input[name="pool"]:checked').value; // all | wrong_blank
+  state.pool = document.querySelector('input[name="pool"]:checked').value;
   go("#step4");
 });
 
 // STEP4 出題順
 $("#startQuiz").addEventListener("click", ()=>{
-  state.order = document.querySelector('input[name="order"]:checked').value; // seq | shuffle
+  state.order = document.querySelector('input[name="order"]:checked').value;
 
-  // 絞り込み
   let rows = state._all.slice();
   if(state.rangeMode === "byWeek"){
-    rows = rows.filter(r=>r.week === state.week);
+    rows = rows.filter(r => (r["week"] || "") === state.week);
   }
   if(state.pool === "wrong_blank"){
     rows = rows.filter(r => !(String(r.enabled).toUpperCase() === "TRUE" || r.enabled === true));
   }
-
-  // 順序
   if(state.order === "shuffle") shuffleInPlace(rows);
 
   state.questions = rows;
   state.idx = 0;
   state.score = 0;
-  setText("#score", "0");
+  setText("#score","0");
 
   if(rows.length === 0){
     alert("出題対象が0件です。条件を変えてください。");
     go("#step3");
     return;
   }
-
   go("#quiz");
   renderQuestion();
 });
 
 /***** 出題・採点 *****/
 function current(){ return state.questions[state.idx]; }
-
 function renderQuestion(){
   const row = current();
   state.phase = "answering";
-
   $("#feedback").innerHTML = "";
   $("#btnNext").classList.add("hidden");
   $("#btnAnswer").classList.remove("hidden");
   $("#btnAnswer").disabled = false;
   $("#answerInput").disabled = false;
   $("#answerInput").value = "";
-
-  // 画像
   if(row.image_url){
     $("#img").src = row.image_url;
     $("#qImage").classList.remove("hidden");
   }else{
     $("#qImage").classList.add("hidden");
   }
-
-  // 問題文
   $("#qText").textContent = row.question ?? "(問題文なし)";
   $("#answerInput").focus();
 }
-
 async function handleAnswer(kind){
-  // すでに採点済みなら無視（Enter連打防止）
-  if (state.phase !== "answering") return;
-
+  if(state.phase !== "answering") return;
   const row = current();
-  let resultFlag = "BLANK";
-  let feedbackHtml = "";
-
+  let resultFlag = "BLANK", feedbackHtml="";
   if(kind === "skip"){
-    resultFlag = "BLANK";
-    feedbackHtml = `スキップしました。`;
+    resultFlag="BLANK"; feedbackHtml="スキップしました。";
   }else{
-    const user = $("#answerInput").value;
-    const ok = matchAnswer(row, user);
-    if(ok){
-      resultFlag = "TRUE";
-      state.score++;
-      setText("#score", String(state.score));
-      feedbackHtml = `⭕ 正解！（答え：${row.answer}）`;
+    const user=$("#answerInput").value;
+    if(matchAnswer(row,user)){
+      resultFlag="TRUE"; state.score++; setText("#score",String(state.score));
+      feedbackHtml=`⭕ 正解！（答え：${row.answer}）`;
     }else{
-      resultFlag = "FALSE";
-      feedbackHtml = `❌ 不正解…（正答：${row.answer}）`;
+      resultFlag="FALSE"; feedbackHtml=`❌ 不正解…（正答：${row.answer}）`;
     }
   }
-
-  // 採点後は「次へ」待ちモードに
-  state.phase = "review";
-  $("#feedback").innerHTML = feedbackHtml;
+  state.phase="review";
+  $("#feedback").innerHTML=feedbackHtml;
   $("#btnAnswer").classList.add("hidden");
-  $("#btnAnswer").disabled = true;
-  $("#answerInput").disabled = true;
+  $("#btnAnswer").disabled=true;
+  $("#answerInput").disabled=true;
   $("#btnNext").classList.remove("hidden");
-
-  // 書き込み
-  try{
-    await setFlag({ sheetName: state.sheetName, id: row.id, result: resultFlag });
-  }catch(e){
-    console.warn("GAS書き込み失敗", e);
-  }
+  try{ await setFlag({ sheetName: state.sheetName, id: row.id, result: resultFlag }); }
+  catch(e){ console.warn("GAS書き込み失敗",e); }
 }
-
-$("#btnAnswer").addEventListener("click", ()=> handleAnswer("answer"));
-$("#btnSkip").addEventListener("click", ()=> handleAnswer("skip"));
-
-// エンターキーでの動作を一括管理
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-
-  // Shift+Enter でスキップ（任意）
-  if (e.shiftKey && state.phase === "answering") {
-    $("#btnSkip").click();
-    e.preventDefault();
-    return;
-  }
-
-  if (state.phase === "answering") {
-    $("#btnAnswer").click();  // 採点
-  } else if (state.phase === "review") {
-    $("#btnNext").click();    // 次の問題へ
-  }
+$("#btnAnswer").addEventListener("click",()=>handleAnswer("answer"));
+$("#btnSkip").addEventListener("click",()=>handleAnswer("skip"));
+document.addEventListener("keydown",(e)=>{
+  if(e.key!=="Enter")return;
+  if(e.shiftKey && state.phase==="answering"){ $("#btnSkip").click(); e.preventDefault(); return; }
+  if(state.phase==="answering"){ $("#btnAnswer").click(); }
+  else if(state.phase==="review"){ $("#btnNext").click(); }
   e.preventDefault();
 });
-
-// 次の問題へ
-$("#btnNext").addEventListener("click", ()=>{
+$("#btnNext").addEventListener("click",()=>{
   state.idx++;
-  if(state.idx >= state.questions.length){
+  if(state.idx>=state.questions.length){
     alert(`終了！ 正解数：${state.score} / ${state.questions.length}`);
     go("#step1");
   }else{
-    renderQuestion(); // ← ここで phase を "answering" に戻す
+    renderQuestion();
   }
 });
