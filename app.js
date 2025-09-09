@@ -87,10 +87,22 @@ function parseCSV(text){
   const header = rows[0].map(s => s.trim());
   return rows.slice(1).filter(r => r.some(v => v !== "")).map(cols => {
     const obj = {};
-    header.forEach((h, idx) => obj[h] = (cols[idx] ?? "").trim());
+if (field.length || row.length) { pushField(); pushRow(); }
+
+if (rows.length === 0) return [];
+const header = rows[0].map(s => s.trim());
+return rows
+  .slice(1)
+  .filter(r => r.some(v => v !== ""))
+  .map(cols => {
+    const obj = {};
+    // ← 見出しを小文字化＆余白除去してキーにする
+    header.forEach((h, idx) => {
+      const key = h.toLowerCase().trim();
+      obj[key] = (cols[idx] ?? "").trim();
+    });
     return obj;
   });
-}
 
 /***** GAS書き込み *****/
 async function setFlag({sheetName, id, result}){
