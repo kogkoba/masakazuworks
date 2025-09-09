@@ -130,14 +130,7 @@ function go(toId){
 }
 
 // STEP1 科目選択
-// STEP1 科目選択
 $("#step1").addEventListener("click", async (ev)=>{
-  const all = await fetchQuestions(state.subject);
-console.log("first row:", all[0]);  // ← week のキーがどう出るか確認
-state._all = all;
-
-  
-  
   const btn = ev.target.closest("button[data-subject]");
   if(!btn) return;
   state.subject = btn.dataset.subject;
@@ -145,20 +138,26 @@ state._all = all;
 
   go("#loading");
 
+  // ← ここでデータ取得
   const all = await fetchQuestions(state.subject);
   state._all = all;
 
-  // 週（授業回）候補を作成
-  const weeks = [...new Set(all.map(r => (r.week ?? "").trim()).filter(Boolean))].sort();
+  // 🔍 デバッグログはココに入れる（必要なときだけ）
+  console.log("first row:", all[0]);               // 1行目の中身を確認（weekキーが見えるはず）
+  console.log("keys:", Object.keys(all[0] || {})); // 取れているキー名一覧
+
+  // 週（授業回）候補を作成（r.week → r["week"] にして安全に）
+  const weeks = [...new Set(
+    all.map(r => (r["week"] || "").trim()).filter(Boolean)
+  )].sort();
 
   const sel = $("#weekSelect");
   const picker = $("#weekPicker");
-  if (!sel)  console.error("#weekSelect が見つかりません");
+  if (!sel)    console.error("#weekSelect が見つかりません");
   if (!picker) console.error("#weekPicker が見つかりません");
 
   if (sel) {
     sel.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join("");
-    // 何も無ければダミー（空）を1つ
     if (weeks.length === 0) {
       sel.innerHTML = `<option value="" disabled>(授業回なし)</option>`;
     }
@@ -166,7 +165,6 @@ state._all = all;
 
   setText("#subjectLabel", state.subject);
 
-  // byWeek が選ばれているなら、ここで一度表示しておく
   if (picker) {
     if (state.rangeMode === "byWeek" && weeks.length > 0) {
       show("#weekPicker");
@@ -177,7 +175,6 @@ state._all = all;
 
   go("#step2");
 });
-
 // STEP2 範囲選択（ラジオの切替で表示/非表示を確実に切り替える）
 document.querySelectorAll('input[name="range"]').forEach(r=>{
   r.addEventListener("change", ()=>{
