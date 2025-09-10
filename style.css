@@ -1,35 +1,138 @@
-:root{--bg:#0b1020;--fg:#fff;--muted:#9aa3b2;--card:#121a33;--accent:#4fc3f7}
+/***************************************************************
+ * 正和復習システム - 完全版スタイルシート（可変パラメータ対応）
+ * 目的：問題文～戻るまでの文字を小さく、画像を大きく見せる
+ * 変更しやすいようフォントサイズ/画像サイズはCSS変数で管理
+ ****************************************************************/
+
+/* ===================== 基本テーマ変数 ===================== */
+:root{
+  /* カラー */
+  --bg:#0b1020;
+  --fg:#fff;
+  --muted:#9aa3b2;
+  --card:#121a33;
+  --accent:#4fc3f7;
+
+  /* フォント（デフォルト=コンパクト） */
+  --font-h1:28px;
+  --font-ui:14px;            /* ボタン/UI共通 */
+  --font-question:14px;      /* 問題文 */
+  --font-input:14px;         /* 解答入力 */
+
+  /* 画像サイズ（vhで画面高に対する割合） */
+  --img-container-vh:60vh;   /* 画像ブロック上限 */
+  --img-max-vh:55vh;         /* 実際の画像上限 */
+
+  /* レイアウト */
+  --radius:10px;
+  --space-xs:8px;
+  --space-sm:12px;
+  --space-md:16px;
+  --shadow-card:0 6px 14px rgba(0,0,0,.18);
+  --shadow-img:0 6px 16px rgba(0,0,0,.3);
+}
+
+/* ====== 任意：従来サイズに戻したいときは body に .ui-regular を付与 ====== */
+.ui-regular{
+  --font-ui:16px;
+  --font-question:20px;
+  --font-input:18px;
+  --img-container-vh:40vh;
+  --img-max-vh:35vh;
+}
+
+/* ====== 画像をさらに大きく見せたい回（地図など）は .ui-xl-image を付与 ====== */
+.ui-xl-image{
+  --img-container-vh:70vh;
+  --img-max-vh:66vh;
+}
+
+/* ====== 画面が十分に広いときは画像を少し拡大（compact時のみ） ====== */
+@media (min-width: 768px) and (min-height: 820px){
+  body:not(.ui-regular){
+    --img-container-vh:65vh;
+    --img-max-vh:60vh;
+  }
+}
+
+/* ===================== ベースリセット/骨格 ===================== */
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  font-size:var(--font-ui);
+}
 .wrap{max-width:920px;margin:24px auto;padding:0 16px}
-h1{font-size:28px;margin:0 0 16px}
-.card{background:var(--card);padding:16px;border-radius:10px;margin:12px 0;box-shadow:0 6px 14px rgba(0,0,0,.18)}
-.row{display:flex;gap:8px;flex-wrap:wrap}
+h1{font-size:var(--font-h1);margin:0 0 var(--space-md)}
+.card{
+  background:var(--card);
+  padding:var(--space-md);
+  border-radius:var(--radius);
+  margin:12px 0;
+  box-shadow:var(--shadow-card)
+}
+
+.row{display:flex;gap:var(--space-xs);flex-wrap:wrap}
 .row.between{justify-content:space-between;align-items:center}
-button{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-weight:700}
-button.primary{background:var(--accent);color:#000}
-button.ghost{background:transparent;border:1px solid #667; color:#fff}
 .hidden{display:none}
-.mt{margin-top:12px}
-.mb{margin-bottom:12px}
+.mt{margin-top:var(--space-sm)}
+.mb{margin-bottom:var(--space-sm)}
 .small{font-size:13px;color:var(--muted)}
-#qText{font-size:14px;line-height:1.4}
-#img{max-width:100%;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.3)}
+hr{border:none;border-top:1px solid #334;margin:var(--space-sm) 0}
+
+/* ===================== ボタン/入力 ===================== */
+button{
+  padding:8px 12px;                 /* コンパクト */
+  border:none;border-radius:8px;
+  cursor:pointer;font-weight:700;
+  font-size:var(--font-ui);
+}
+button.primary{background:var(--accent);color:#000}
+button.ghost{background:transparent;border:1px solid #667;color:#fff}
+
 input[type="text"]{
-  width:100%;padding:8px;border-radius:8px;border:1px solid #445;background:#0f1630;color:#fff;font-size:14px}
-hr{border:none;border-top:1px solid #334}
-/* === 画像サイズ調整 === */
-#qImage {
-  text-align: center;        /* 画像を中央寄せ */
-  max-height: 60vh;          /* セクション全体の高さを制限 */
-  margin-bottom: 12px;
+  width:100%;
+  padding:8px;                      /* コンパクト */
+  border-radius:8px;
+  border:1px solid #445;
+  background:#0f1630;
+  color:#fff;
+  font-size:var(--font-input);
 }
 
-#img {
-  max-width: 100%;           /* 横幅は親要素に収める */
-  max-height: 55vh;          /* 画面高の35%に制限（必ず収まる） */
-  object-fit: contain;       /* 縦横比を維持して収める */
-  border-radius: 8px;
-  box-shadow: 0 6px 16px rgba(0,0,0,.3);
+/* ===================== 問題文 ===================== */
+#qText{
+  font-size:var(--font-question);
+  line-height:1.4;
+  margin-bottom:8px;
 }
 
+/* ===================== 画像表示 ===================== */
+/* 画像コンテナ：中央寄せ＋高さ上限をvhで管理 */
+#qImage{
+  text-align:center;
+  max-height:var(--img-container-vh);
+  margin-bottom:var(--space-sm);
+}
+
+/* 実画像：コンテナの幅に収めつつ、縦はvhで拡大 */
+#img{
+  max-width:100%;
+  max-height:var(--img-max-vh);
+  height:auto;                      /* 比率維持 */
+  object-fit:contain;               /* 余白込みで全体を収める */
+  border-radius:8px;
+  box-shadow:var(--shadow-img);
+}
+
+/* ===================== 細かな調整 ===================== */
+/* 小画面でのタップしやすさは確保（高さのみ微増） */
+@media (max-width:420px){
+  button{padding:10px 14px}
+  input[type="text"]{padding:10px}
+}
+
+/* キーボード出現や候補ポップアップ時にも入力欄が被りにくいよう余白 */
+.answer-area{margin-top:var(--space-sm)}
