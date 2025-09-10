@@ -6,27 +6,28 @@ h1{font-size:28px;margin:0 0 16px}
 .card{background:var(--card);padding:16px;border-radius:10px;margin:12px 0;box-shadow:0 6px 14px rgba(0,0,0,.18)}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .row.between{justify-content:space-between;align-items:center}
-button{padding:10px 14px;border:none;border-radius:8px;cursor:pointer;font-weight:700}
+button{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-weight:700}
 button.primary{background:var(--accent);color:#000}
 button.ghost{background:transparent;border:1px solid #667; color:#fff}
 .hidden{display:none}
 .mt{margin-top:12px}
 .mb{margin-bottom:12px}
 .small{font-size:13px;color:var(--muted)}
-#qText{font-size:20px;line-height:1.4}
+#qText{font-size:14px;line-height:1.4}
 #img{max-width:100%;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.3)}
-input[type="text"]{width:100%;padding:12px;border-radius:8px;border:1px solid #445;background:#0f1630;color:#fff;font-size:18px}
+input[type="text"]{
+  width:100%;padding:8px;border-radius:8px;border:1px solid #445;background:#0f1630;color:#fff;font-size:14px}
 hr{border:none;border-top:1px solid #334}
 /* === 画像サイズ調整 === */
 #qImage {
   text-align: center;        /* 画像を中央寄せ */
-  max-height: 40vh;          /* セクション全体の高さを制限 */
+  max-height: 60vh;          /* セクション全体の高さを制限 */
   margin-bottom: 12px;
 }
 
 #img {
   max-width: 100%;           /* 横幅は親要素に収める */
-  max-height: 35vh;          /* 画面高の35%に制限（必ず収まる） */
+  max-height: 55vh;          /* 画面高の35%に制限（必ず収まる） */
   object-fit: contain;       /* 縦横比を維持して収める */
   border-radius: 8px;
   box-shadow: 0 6px 16px rgba(0,0,0,.3);
