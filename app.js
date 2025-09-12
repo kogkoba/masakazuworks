@@ -1,237 +1,93 @@
-/***** 設定 *****/
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbx8QDPVmasQfRcp990Pe-cLsbCPFtgwGfP29NvsTbjCTg5KQCezLdEvxSj8yqdz8PO9Yw/exec';
-const SUBJECTS = {
-  "算数": { sheetName: "算数" },
-  "国語": { sheetName: "国語" },
-  "理科": { sheetName: "理科" },
-  "社会": { sheetName: "社会" },
-};
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>正和復習システム</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <h1>正和復習システム</h1>
 
-/***** 状態 *****/
-const state = {
-  subject: "国語",      // 初期科目
-  pool: "all",          // all | wrong_or_blank
-  order: "random",      // random | sequential
-  rows: [],
-  i: 0,
-  todayCount: 0
-};
+      <div class="toolbar">
+        <div class="today-counter">
+          本日獲得ポイント：<span id="pointTodayTop">0</span>
+          <button id="resetTodayTop" class="ghost">リセット</button>
+        </div>
+      </div>
 
-/***** ユーティリティ *****/
-const norm = s => String(s ?? '').trim().replace(/\s+/g, '');
-function parseAlts(s){
-  return String(s ?? '')
-    .split(/[\/｜|,，；;]+/)
-    .map(x => norm(x))
-    .filter(Boolean);
-}
-function shuffle(a){
-  for(let i=a.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [a[i],a[j]]=[a[j],a[i]];
-  }
-}
-const todayKey = () => {
-  const d = new Date();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `point_${d.getFullYear()}-${m}-${day}`;
-};
-function loadTodayPoint(){
-  const v = Number(localStorage.getItem(todayKey()) || 0);
-  state.todayCount = isNaN(v) ? 0 : v;
-  const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-  els.forEach(el => {
-    if (el) el.textContent = String(state.todayCount);
-  });
-}
-function saveTodayPoint(){
-  localStorage.setItem(todayKey(), String(state.todayCount));
-}
-
-/***** 画面表示の切り替え *****/
-function showPanel(panelId) {
-  document.querySelector('#subjectPanel').classList.add('hidden');
-  document.querySelector('#quizPanel').classList.add('hidden');
-  document.querySelector(panelId).classList.remove('hidden');
-}
-
-/***** ステータス表示 *****/
-function setStatus(txt){
-  const st = document.querySelector('#status');
-  if (st) st.textContent = txt || '';
-}
-
-/***** 出題の取得 *****/
-async function loadQuestions(){
-  const sheetName = SUBJECTS[state.subject].sheetName;
-  const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=${state.pool}`;
-
-  setStatus(`読み込み中…（科目：${state.subject}）`);
-  try{
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'fetch_error');
-
-    state.rows = Array.isArray(json.rows) ? json.rows : [];
-    if (state.order === 'random') shuffle(state.rows);
-    state.i = 0;
-
-    const totalEl = document.querySelector('#qTotal');
-    if (totalEl) totalEl.textContent = `${state.rows.length}`;
-    
-    if (state.rows.length === 0){
-      setStatus(`「${state.subject}」に該当の問題がありません（フィルタを見直してね）`);
-      return;
-    }
-    setStatus('');
-    showPanel('#quizPanel');
-    renderQuestion(state.rows[state.i]);
-  }catch(e){
-    console.error(e);
-    setStatus('読み込みに失敗しました');
-  }
-}
-
-/***** 1問描画 *****/
-function renderQuestion(row){
-  const qEl = document.querySelector('#qText');
-  const imgWrap = document.querySelector('#qImageWrap');
-  const imgEl = document.querySelector('#qImage');
-  const ansEl = document.querySelector('#answerInput');
-  const idxEl = document.querySelector('#qIndex');
-  const feedbackEl = document.querySelector('#feedback');
-
-  if (!row){
-    if (qEl) qEl.textContent = '問題がありません';
-    if (imgEl){ imgEl.removeAttribute('src'); imgWrap.classList.add('hidden'); }
-    if (ansEl) ansEl.value = '';
-    if (idxEl) idxEl.textContent = '0';
-    if (feedbackEl) feedbackEl.textContent = '';
-    return;
-  }
-
-  if (qEl) qEl.textContent = row.question;
-  if (imgEl){
-    if (row.image_url){ imgEl.src = row.image_url; imgWrap.classList.remove('hidden'); }
-    else { imgEl.removeAttribute('src'); imgWrap.classList.add('hidden'); }
-  }
-  if (ansEl){ ansEl.value=''; ansEl.focus(); }
-  if (idxEl) idxEl.textContent = `${state.i+1}`;
-  if (feedbackEl) feedbackEl.textContent = '';
-}
-
-/***** 回答処理 → G列ログ（正解→空白 / 不正解→TRUE） *****/
-async function submitAnswer(){
-  if (state.i >= state.rows.length) return;
-
-  const row = state.rows[state.i];
-  const ansEl = document.querySelector('#answerInput');
-  const user = norm(ansEl ? ansEl.value : '');
-
-  const corrects = new Set([norm(row.answer), ...parseAlts(row.alt_answers)]);
-  const correct = corrects.has(user);
-
-  const feedbackEl = document.querySelector('#feedback');
-  if (feedbackEl) feedbackEl.textContent = correct ? '正解！' : `不正解… 正：${row.answer}`;
-
-  try{
-    await fetch(GAS_URL, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        action:'log',
-        sheetName: SUBJECTS[state.subject].sheetName,
-        id: row.id,
-        correct
-      })
-    });
-  }catch(e){
-    console.error('log failed', e);
-  }
-
-  if (correct){
-    state.todayCount += 1;
-    saveTodayPoint();
-    const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-    els.forEach(el => {
-      if (el) el.textContent = String(state.todayCount);
-    });
-  }
-
-  state.i += 1;
-  if (state.i >= state.rows.length) finishSet();
-  else renderQuestion(state.rows[state.i]);
-}
-
-/***** セット終了表示 *****/
-function finishSet(){
-  const qEl = document.querySelector('#qText');
-  const imgWrap = document.querySelector('#qImageWrap');
-  const idxEl = document.querySelector('#qIndex');
-  const ansEl = document.querySelector('#answerInput');
-  if (qEl) qEl.textContent = 'おしまい！おつかれさま 🙌';
-  if (imgWrap) imgWrap.classList.add('hidden');
-  if (idxEl) idxEl.textContent = `${state.rows.length}`;
-  if (ansEl) ansEl.value = '';
-}
-
-/***** イベント結線（委譲+フォールバック） *****/
-function bindEvents(){
-  // 科目切替
-  document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('[data-subject]');
-    if (!btn) return;
-    const cand = btn.dataset.subject;
-
-    if (state.subject !== cand){
-      state.subject = cand;
-      // 見た目
-      document.querySelectorAll('[data-subject]').forEach(b=>{
-        b.classList.toggle('primary', b.dataset.subject === cand);
-      });
-      showPanel('#subjectPanel'); // 科目選択画面に戻る
-    }
-  });
-
-  // フィルタ切替
-  document.addEventListener('change', (e)=>{
-    const p = e.target.closest('input[name="pool"]');
-    if (p) state.pool = p.value;
-    const o = e.target.closest('input[name="order"]');
-    if (o) state.order = o.value;
-  });
-
-  // クイズ開始ボタン
-  document.querySelector('#startBtn').addEventListener('click', loadQuestions);
-  document.querySelector('#backBtn').addEventListener('click', ()=>{ showPanel('#subjectPanel'); });
-
-
-  // 送信
-  const input = document.querySelector('#answerInput');
-  if (input) input.addEventListener('keydown', e=>{ if (e.key==='Enter') submitAnswer(); });
-  const sb = document.querySelector('#submitBtn');
-  if (sb) sb.addEventListener('click', submitAnswer);
-
-  // 本日ポイントリセット
-  const rstTop = document.querySelector('#resetTodayTop');
-  if (rstTop) rstTop.addEventListener('click', resetTodayPoint);
-  const rstBottom = document.querySelector('#resetToday');
-  if (rstBottom) rstBottom.addEventListener('click', resetTodayPoint);
-}
-
-function resetTodayPoint(){
-  state.todayCount = 0;
-  saveTodayPoint();
-  const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-  els.forEach(el => {
-    if (el) el.textContent = '0';
-  });
-}
-
-/***** 初期化 *****/
-window.addEventListener('DOMContentLoaded', async ()=>{
-  bindEvents();
-  loadTodayPoint();
-  showPanel('#subjectPanel');
-});
+      <section class="card">
+        <h2 class="step">① 科目を選ぶ</h2>
+        <div class="row">
+          <button type="button" class="chip" data-subject="算数">算数</button>
+          <button type="button" class="chip" data-subject="国語">国語</button>
+          <button type="button" class="chip" data-subject="理科">理科</button>
+          <button type="button" class="chip" data-subject="社会">社会</button>
+        </div>
+      </section>
+    </header>
+  
+    <section id="subjectPanel" class="card hidden">
+      <h2 id="subjectTitle"></h2>
+  
+      <div class="mode-row">
+        <div class="seg">
+          <button class="seg-btn active" data-scope="all">小４全授業</button>
+          <button class="seg-btn" data-scope="byweek">授業回</button>
+        </div>
+        <select id="weekSelect" class="hidden" aria-label="授業回の選択"></select>
+      </div>
+  
+      <div class="filters">
+        <label><input type="radio" name="pool" value="all" checked> 全問</label>
+        <label><input type="radio" name="pool" value="wrong_or_blank"> 不正解＆未回答</label>
+  
+        <label class="spacer"></label>
+  
+        <label><input type="radio" name="order" value="random" checked> ランダム</label>
+        <label><input type="radio" name="order" value="sequential"> 上から順に</label>
+      </div>
+  
+      <div class="start-row">
+        <button id="startBtn" class="primary">クイズ開始</button>
+        <div class="counter">
+          本日獲得ポイント：<span id="pointToday">0</span>
+          <button id="resetToday" class="ghost">リセット</button>
+        </div>
+      </div>
+    </section>
+  
+    <section id="quizPanel" class="card hidden">
+      <div class="quiz-header">
+        <div>Q<span id="qIndex">0</span>/<span id="qTotal">0</span>　<span id="qWeek"></span></div>
+        <button id="backBtn" class="ghost">← メニューへ</button>
+      </div>
+  
+      <div id="qImageWrap" class="q-image-wrap hidden">
+        <img id="qImage" alt="question image">
+      </div>
+  
+      <div id="qText" class="q-text"></div>
+  
+      <div class="answer-row">
+        <input id="answerInput" type="text" placeholder="ここにタイピング" autocomplete="off" />
+        <button id="submitBtn" class="primary">送信</button>
+      </div>
+  
+      <div id="feedback" class="feedback" aria-live="polite"></div>
+  
+      <div class="nav-row">
+        <button id="skipBtn" class="ghost">わからない（スキップ）</button>
+        <button id="nextBtn" class="primary hidden">次へ</button>
+      </div>
+    </section>
+  
+    <footer class="foot">
+      <small>データ元：こぐれさんスプレッドシート</small>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
