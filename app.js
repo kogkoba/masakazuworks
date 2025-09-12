@@ -2,7 +2,7 @@ console.log('[quiz-app] boot'); // 起動確認ログ
 
 /***** 設定 *****/
 // こぐれさんの最新デプロイURL
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxiQ5xQsfh6uDXZYHshoLtAmnGbICKBFzv5bjOIYQwHuZ2s45Zt8O46-4x-4IzENcIzTA/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzwO8zzHkZTKsWihKeJiEZmWXRRGPcgo80c5Btgv_AI7J9o65-KFPbLuKaXXVSO_uimCQ/exec";
 
 const SUBJECTS = {
   "算数": { sheetName: "算数" },
