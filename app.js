@@ -40,6 +40,8 @@ let order = 'random';   // random | sequential
 let pool  = 'all';      // all | wrong_or_blank
 let scope = 'all';      // all | byweek
 let seqIndex = 0;
+// 1問につきスコア加算は1回だけにするフラグ
+let canGradeThisQuestion = true;
 
 // ===== ポイント =====
 const loadPointsToday = ()=> Number(localStorage.getItem(LS_TODAY) || '0');
@@ -72,7 +74,7 @@ async function fetchSheetRows(subject){
 
   // 2) ラベルに欲しいものが無ければ、先頭行をヘッダーとして再解釈
   if(okCount < 3 && grid.length){
-    const cand = grid[0].map(s => s.trim());
+    const cand = grid[0].map(s => (s||'').trim());
     const match = cand.filter(x => want.has(x)).length;
     if(match >= 3){
       labels = cand;
@@ -103,10 +105,16 @@ function parseEnabled(v){
   return true;
 }
 
-function normalizeRow(r){
+function normalizeRow(r, idx){
   const map = CFG.columnMap;
+  let id = (r[map.id]||'').trim();
+  if(!id){
+    // IDが空の行は安全な仮IDを付与（シート変更しても衝突しにくい）
+    const w = (r[map.week]||'').trim() || 'ALL';
+    id = `R${idx+1}:${w}`;
+  }
   return {
-    id: (r[map.id]||'').trim(),
+    id,
     week: (r[map.week]||'').trim(),
     question: (r[map.question]||'').trim(),
     answer: (r[map.answer]||'').trim(),
@@ -122,11 +130,37 @@ function getProgress(subject){
   catch(e){ return {}; }
 }
 function setProgress(subject, prog){ localStorage.setItem(LS_KEY(subject), JSON.stringify(prog)); }
-function markResult(subject, id, isCorrect){
+function markResultLocal(subject, id, isCorrect){
   if(!id) return;
   const p = getProgress(subject);
   p[id] = isCorrect ? "TRUE" : "FALSE";
   setProgress(subject, p);
+}
+
+// ===== GAS送信（任意） =====
+async function sendResultToGAS({subject, id, isCorrect, week}) {
+  if(!CFG.gasUrl) return; // オプション
+  try{
+    await fetch(CFG.gasUrl, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        action: 'mark',
+        subject,
+        id,
+        week: week || '',
+        result: isCorrect ? 'TRUE' : 'FALSE',
+        ts: new Date().toISOString()
+      })
+    });
+  }catch(e){
+    // ネットワークエラー等は握りつぶし（学習を止めない）
+    console.warn('GAS送信に失敗:', e);
+  }
+}
+function markResult(subject, row, isCorrect){
+  markResultLocal(subject, row.id, isCorrect);
+  sendResultToGAS({subject, id: row.id, isCorrect, week: row.week});
 }
 
 // ===== フィルタ/並び替え =====
@@ -148,8 +182,9 @@ function setScope(newScope){
   scope = newScope;
   document.querySelectorAll('.seg-btn').forEach(b=>b.classList.toggle('active', b.dataset.scope===scope));
   if(weekSelect){
-    weekSelect.classList.toggle('hidden', scope!=='byweek');
-    weekSelect.disabled = (scope!=='byweek') ? true : false; // 念のため
+    const byWeek = (scope==='byweek');
+    weekSelect.classList.toggle('hidden', !byWeek);
+    weekSelect.disabled = !byWeek;
   }
 }
 document.querySelectorAll('.seg-btn').forEach(btn=>{
@@ -178,7 +213,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 
     // ★ JSONで取得（改行安全）＋ 必須列チェック
     const raw = await fetchSheetRows(currentSubject);
-    allRows = raw.map(normalizeRow)
+    allRows = raw.map((r,i)=>normalizeRow(r,i))
                  .filter(r => r.question && r.answer && r.enabled !== false);
 
     // 週プルダウン（件数つき／自然順）
@@ -249,8 +284,10 @@ document.addEventListener('keydown', (e)=>{
 });
 
 skipBtn?.addEventListener('click', ()=>{
+  if(!canGradeThisQuestion) return; // 二重実行防止
+  canGradeThisQuestion = false;
   showFeedback(false, `スキップしました。答え：${fmtAnswer(cur().answer)}`);
-  markResult(currentSubject, cur().id, false);
+  markResult(currentSubject, cur(), false);
   nextBtn?.classList.remove('hidden');
 });
 nextBtn?.addEventListener('click', ()=> next());
@@ -260,6 +297,7 @@ function cur(){ return quizRows[seqIndex]; }
 
 function showQuestion(idx){
   seqIndex = idx;
+  canGradeThisQuestion = true; // ★この問題はまだ採点していない
   const row = cur();
   if(qIndexEl) qIndexEl.textContent = (idx+1);
   if(qWeekEl)  qWeekEl.textContent = row.week ? `（${row.week}）` : '';
@@ -270,6 +308,7 @@ function showQuestion(idx){
     qImageWrap.classList.remove('hidden');
   }else{
     qImageWrap?.classList.add('hidden');
+    if(qImage) qImage.removeAttribute('src');
   }
 
   if(answerInput){
@@ -290,11 +329,14 @@ function normalizeKana(s){
 function fmtAnswer(a){ return a; }
 
 function grade(){
+  if(!canGradeThisQuestion) return; // ★同一問題での二重加点をブロック
+  canGradeThisQuestion = false;
+
   const row = cur();
   const input  = normalizeKana(sanitize(answerInput?.value));
   const target = normalizeKana(sanitize(row.answer));
   const alts = (row.alt||'')
-    .split(/[\/|、,]| or /i)
+    .split(/[\/|、,，．。]| or /i) // 区切り強化（全角句読点にも対応）
     .map(s=> normalizeKana(sanitize(s)))
     .filter(Boolean);
   const ok = input && (input===target || alts.includes(input));
@@ -302,12 +344,15 @@ function grade(){
   if(ok){
     showFeedback(true, '正解！+1P');
     addPoint(1);
-    markResult(currentSubject, row.id, true);
+    markResult(currentSubject, row, true);
   }else{
     const show = row.answer + (row.alt ? `（別解：${row.alt}）` : '');
     showFeedback(false, `ざんねん…　正解：${show}`);
-    markResult(currentSubject, row.id, false);
+    markResult(currentSubject, row, false);
   }
+
+  // 採点後は入力を無効化して「次へ」に誘導（誤タップ防止）
+  if(answerInput) answerInput.blur();
   nextBtn?.classList.remove('hidden');
 }
 
@@ -319,6 +364,13 @@ function showFeedback(isOk, text){
 }
 
 function next(){
+  // 既に採点済みでないまま次へを押した場合は未正解扱いで記録（任意仕様）
+  if(canGradeThisQuestion){
+    canGradeThisQuestion = false;
+    const row = cur();
+    markResult(currentSubject, row, false);
+  }
+
   if(seqIndex+1 < quizRows.length){
     showQuestion(seqIndex+1);
   }else{
