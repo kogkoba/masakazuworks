@@ -10,6 +10,26 @@
   <main class="wrap">
     <h1>正和復習システム</h1>
 
+    <header class="top">
+  <h1>正和復習システム</h1>
+
+  <!-- 追加：本日ポイント（4科合計） -->
+  <div class="toolbar">
+    <div class="today-counter">
+      本日獲得ポイント：<span id="pointTodayTop">0</span>
+      <button id="resetTodayTop" class="ghost">リセット</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn" data-subject="算数">算数</button>
+    <button class="tab-btn" data-subject="国語">国語</button>
+    <button class="tab-btn" data-subject="理科">理科</button>
+    <button class="tab-btn" data-subject="社会">社会</button>
+  </div>
+</header>
+
+
     <!-- STEP 1: 科目選択 -->
     <section id="step1" class="card">
       <h2>① 科目を選ぶ</h2>
