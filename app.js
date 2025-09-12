@@ -235,32 +235,45 @@ function finishSet(){
 
 /***** イベント結線 *****/
 function bindEvents(){
-  // 科目切替
-  document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('[data-subject]');
-    if (!btn) return;
-    const cand = btn.dataset.subject;
-    if (state.subject !== cand){
-      state.subject = cand;
-      document.querySelectorAll('[data-subject]').forEach(b=>{
-        b.classList.toggle('primary', b.dataset.subject === cand);
-      });
-      const subjectTitle = document.querySelector('#subjectTitle');
-      if (subjectTitle) subjectTitle.textContent = cand;
-      showPanel('#subjectPanel');
-      state.scope = 'all';
-      state.week = null;
-      document.querySelectorAll('.seg-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.scope === 'all');
-      });
-      const weekSelect = document.querySelector('#weekSelect');
-      if (weekSelect) {
-        weekSelect.classList.add('hidden');
-        weekSelect.value = '';
-      }
-      loadWeeks();
-    }
+// 科目切替（差し替え版）
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('[data-subject]');
+  if (!btn) return;
+
+  const cand = btn.dataset.subject;
+  const changed = (state.subject !== cand);
+  state.subject = cand;  // 同一科目でも更新扱いにしてOK
+
+  // 見た目（primary）を更新
+  document.querySelectorAll('[data-subject]').forEach(b=>{
+    b.classList.toggle('primary', b.dataset.subject === cand);
   });
+
+  // タイトル更新＆パネルを必ず開く
+  const subjectTitle = document.querySelector('#subjectTitle');
+  if (subjectTitle) subjectTitle.textContent = cand;
+  showPanel('#subjectPanel');
+
+  // スコープと週選択は毎回リセットして分かりやすく
+  state.scope = 'all';
+  state.week = null;
+  document.querySelectorAll('.seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.scope === 'all');
+  });
+  const weekSelect = document.querySelector('#weekSelect');
+  if (weekSelect) {
+    weekSelect.classList.add('hidden');
+    weekSelect.value = '';
+  }
+
+  // 授業回リストは、科目が変わった時だけ読み直し
+  if (changed) {
+    loadWeeks();
+  } else {
+    // 同一科目クリックでも、まだ未取得なら読み込み
+    if (!weekSelect || weekSelect.options.length <= 1) loadWeeks();
+  }
+});
 
   // pool / order 切替
   document.addEventListener('change', (e)=>{
