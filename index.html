@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>正和復習システム</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <main class="wrap">
@@ -28,12 +29,10 @@
         </div>
       </section>
     </header>
-  
+
     <section id="subjectPanel" class="card hidden">
       <h2 id="subjectTitle"></h2>
 
-      <div id="status" class="status" aria-live="polite"></div>
-  
       <div class="mode-row">
         <div class="seg">
           <button class="seg-btn active" data-scope="all">小４全授業</button>
@@ -41,17 +40,17 @@
         </div>
         <select id="weekSelect" class="hidden" aria-label="授業回の選択"></select>
       </div>
-  
+
       <div class="filters">
         <label><input type="radio" name="pool" value="all" checked> 全問</label>
-        <label><input type="radio" name="pool" value="wrong_or_blank"> 不正解＆未回答</label>
-  
+        <label><input type="radio" name="pool" value="wrong_blank"> 不正解＆未回答</label>
+
         <label class="spacer"></label>
-  
+
         <label><input type="radio" name="order" value="random" checked> ランダム</label>
         <label><input type="radio" name="order" value="sequential"> 上から順に</label>
       </div>
-  
+
       <div class="start-row">
         <button id="startBtn" class="primary">クイズ開始</button>
         <div class="counter">
@@ -59,37 +58,40 @@
           <button id="resetToday" class="ghost">リセット</button>
         </div>
       </div>
+
+      <div id="status" style="min-height:1.2em; margin-top:6px; opacity:.9;"></div>
     </section>
-  
+
     <section id="quizPanel" class="card hidden">
       <div class="quiz-header">
         <div>Q<span id="qIndex">0</span>/<span id="qTotal">0</span>　<span id="qWeek"></span></div>
         <button id="backBtn" class="ghost">← メニューへ</button>
       </div>
-  
+
       <div id="qImageWrap" class="q-image-wrap hidden">
         <img id="qImage" alt="question image">
       </div>
-  
+
       <div id="qText" class="q-text"></div>
-  
+
       <div class="answer-row">
         <input id="answerInput" type="text" placeholder="ここにタイピング" autocomplete="off" />
         <button id="submitBtn" class="primary">送信</button>
       </div>
-  
+
       <div id="feedback" class="feedback" aria-live="polite"></div>
-  
+
       <div class="nav-row">
         <button id="skipBtn" class="ghost">わからない（スキップ）</button>
-        <button id="nextBtn" class="primary hidden" disabled>次へ</button>
+        <button id="nextBtn" class="primary hidden">次へ</button>
       </div>
     </section>
-  
+
     <footer class="foot">
       <small>データ元：こぐれさんスプレッドシート</small>
     </footer>
   </main>
+
   <script src="app.js"></script>
 </body>
 </html>
