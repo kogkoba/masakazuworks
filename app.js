@@ -1,341 +1,116 @@
 /***** 設定 *****/
-// こぐれさんの最新デプロイURL
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxiQ5xQsfh6uDXZYHshoLtAmnGbICKBFzv5bjOIYQwHuZ2s45Zt8O46-4x-4IzENcIzTA/exec";
+const SHEET_ID = '1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA';
 
-const SUBJECTS = {
-  "算数": { sheetName: "算数" },
-  "国語": { sheetName: "国語" },
-  "理科": { sheetName: "理科" },
-  "社会": { sheetName: "社会" },
-};
-
-/***** 状態 *****/
-const state = {
-  subject: "国語",        // 初期表示で国語を選択
-  pool: "all",            // all | wrong_blank
-  order: "random",        // random | sequential
-  scope: "all",           // all | byweek
-  week: null,
-  rows: [],
-  i: 0,
-  todayCount: 0,
-};
-
-/***** ユーティリティ *****/
-const norm = s => String(s ?? '').trim().replace(/\s+/g, '');
-function parseAlts(s){
-  return String(s ?? '')
-    .split(/[|｜,，；;／/・\s]+/)   // 区切り文字いろいろ対応
-    .map(x => norm(x))
-    .filter(Boolean);
-}
-function shuffle(a){
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-}
-const todayKey = () => {
-  const d = new Date();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `point_${d.getFullYear()}-${m}-${day}`;
-};
-function loadTodayPoint(){
-  const v = Number(localStorage.getItem(todayKey()) || 0);
-  state.todayCount = Number.isFinite(v) ? v : 0;
-  const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-  els.forEach(el => { if (el) el.textContent = String(state.todayCount); });
-}
-function saveTodayPoint(){
-  localStorage.setItem(todayKey(), String(state.todayCount));
+/***** ユーティリティ（JSON返却）*****/
+function outJSON(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
-/***** 表示切替 *****/
-function showPanel(panelId) {
-  document.querySelector('#subjectPanel').classList.add('hidden');
-  document.querySelector('#quizPanel').classList.add('hidden');
-  document.querySelector(panelId).classList.remove('hidden');
+function getSheetByName(name) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ss.getSheetByName(name);
+  if (!sh) throw new Error(`シートが見つかりません: ${name}`);
+  return sh;
 }
 
-/***** ステータス *****/
-function setStatus(txt){
-  const st = document.querySelector('#status');
-  if (st) st.textContent = txt || '';
-}
-
-/***** 授業回の選択肢を生成 *****/
-async function loadWeeks() {
-  const sheetName = SUBJECTS[state.subject].sheetName;
-  const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=all`;
-
+/***** GET: 出題取得
+ * /exec?action=get&sheetName=国語&pool=all|wrong_blank
+*****/
+function doGet(e) {
   try {
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'fetch_error');
+    const action = String(e.parameter.action || '').trim();
+    if (action !== 'get') return outJSON({ ok:false, error:'unknown_action' });
 
-    const rows = Array.isArray(json.rows) ? json.rows : [];
-    const weeks = [...new Set(rows.map(row => row.week).filter(Boolean))].sort();
+    const sheetName = String(e.parameter.sheetName || '').trim();
+    const pool      = String(e.parameter.pool || 'all').trim(); // all | wrong_blank
 
-    const weekSelect = document.querySelector('#weekSelect');
-    if (weekSelect) {
-      weekSelect.innerHTML = '<option value="">- 授業回を選択 -</option>';
-      weeks.forEach(week => {
-        const option = document.createElement('option');
-        option.value = week;
-        option.textContent = week;
-        weekSelect.appendChild(option);
-      });
-    }
-  } catch(e) {
-    console.error('Failed to load weeks', e);
-  }
-}
+    const sh = getSheetByName(sheetName);
+    const last = sh.getLastRow();
+    if (last < 2) return outJSON({ ok:true, rows:[] });
 
-/***** 出題の取得 *****/
-async function loadQuestions(){
-  const sheetName = SUBJECTS[state.subject].sheetName;
-  const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=${encodeURIComponent(state.pool)}`;
+    // A:G
+    const values = sh.getRange(2, 1, last - 1, 7).getValues();
 
-  setStatus(`読み込み中…（科目：${state.subject}）`);
-  try{
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'fetch_error');
-
-    let rows = Array.isArray(json.rows) ? json.rows : [];
-
-    // 授業回フィルタ
-    if (state.scope === 'byweek' && state.week) {
-      rows = rows.filter(row => String(row.week) === String(state.week));
-    }
-
-    if (state.order === 'random') shuffle(rows); // sequentialなら並べ替えなし
-    state.rows = rows;
-    state.i = 0;
-
-    const totalEl = document.querySelector('#qTotal');
-    if (totalEl) totalEl.textContent = `${state.rows.length}`;
-
-    if (state.rows.length === 0){
-      setStatus(`「${state.subject}」に該当の問題がありません（フィルタを見直してね）`);
-      return;
-    }
-    setStatus('');
-    showPanel('#quizPanel');
-    renderQuestion(state.rows[state.i]);
-  }catch(e){
-    console.error(e);
-    setStatus('読み込みに失敗しました');
-  }
-}
-
-/***** 1問描画 *****/
-function renderQuestion(row){
-  const qEl = document.querySelector('#qText');
-  const imgWrap = document.querySelector('#qImageWrap');
-  const imgEl = document.querySelector('#qImage');
-  const ansEl = document.querySelector('#answerInput');
-  const idxEl = document.querySelector('#qIndex');
-  const feedbackEl = document.querySelector('#feedback');
-  const weekEl = document.querySelector('#qWeek');
-
-  if (!row){
-    if (qEl) qEl.textContent = '問題がありません';
-    if (imgEl){ imgEl.removeAttribute('src'); }
-    if (imgWrap){ imgWrap.classList.add('hidden'); }
-    if (ansEl) ansEl.value = '';
-    if (idxEl) idxEl.textContent = '0';
-    if (feedbackEl) feedbackEl.textContent = '';
-    if (weekEl) weekEl.textContent = '';
-    return;
-  }
-
-  if (qEl) qEl.textContent = row.question || '';
-  if (imgEl && imgWrap){
-    if (row.image_url) {
-      imgEl.src = row.image_url;
-      imgWrap.classList.remove('hidden');
-    } else {
-      imgEl.removeAttribute('src');
-      imgWrap.classList.add('hidden');
-    }
-  }
-  if (ansEl){ ansEl.value=''; ansEl.focus(); }
-  if (idxEl) idxEl.textContent = `${state.i+1}`;
-  if (feedbackEl){ feedbackEl.textContent = ''; feedbackEl.classList.remove('ok','ng'); }
-  if (weekEl) weekEl.textContent = row.week ? String(row.week) : '';
-}
-
-/***** 回答処理（G列ログ：正解→空白 / 不正解→TRUE） *****/
-async function submitAnswer(correctOverride=null){
-  if (state.i >= state.rows.length) return;
-
-  const row = state.rows[state.i];
-  const ansEl = document.querySelector('#answerInput');
-  const user = norm(ansEl ? ansEl.value : '');
-
-  const corrects = new Set([norm(row.answer), ...parseAlts(row.alt_answers)]);
-  const correct = (correctOverride === null) ? corrects.has(user) : !!correctOverride;
-
-  const feedbackEl = document.querySelector('#feedback');
-  if (feedbackEl) {
-    feedbackEl.textContent = correct ? '正解！' : `不正解… 正：${row.answer}`;
-    feedbackEl.classList.toggle('ok', correct);
-    feedbackEl.classList.toggle('ng', !correct);
-  }
-
-  // POST: preflight回避のため text/plain を使用（レスポンスは使わない）
-  try {
-    await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action:'log',
-        sheetName: SUBJECTS[state.subject].sheetName,
-        id: row.id,
-        correct
+    const rows = values
+      .filter(r => {
+        if (pool === 'all') return true;
+        if (pool === 'wrong_blank') {
+          const g = r[6];
+          const isTrue  = (g === true) || (String(g).toUpperCase() === 'TRUE');
+          const isBlank = (g === '' || g === null);
+          return isTrue || isBlank;
+        }
+        return true;
       })
-    });
-  } catch(e){
-    console.error('log failed', e);
+      .map(r => ({
+        id: String(r[0]),                 // A
+        week: r[1],                       // B
+        question: r[2],                   // C
+        answer: String(r[3]),             // D
+        alt_answers: String(r[4] || ''),  // E
+        image_url: String(r[5] || ''),    // F
+        wrong_flag: String(r[6] || '')    // G
+      }));
+
+    return outJSON({ ok:true, rows });
+  } catch (err) {
+    return outJSON({ ok:false, error: String(err) });
   }
+}
 
-  if (correct){
-    state.todayCount += 1;
-    saveTodayPoint();
-    const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-    els.forEach(el => { if (el) el.textContent = String(state.todayCount); });
+/***** POST: 結果ログ（正解→空白 / 不正解→TRUE）*****/
+function doPost(e) {
+  try {
+    const data = parsePayload(e);  // JSONでもformでもOKにする
+    const action = String(data.action || '').trim();
+    if (action !== 'log') return outJSON({ ok:false, error:'unknown_action' });
+
+    const sheetName = String(data.sheetName || '').trim();
+    const id        = String(data.id || '').trim();
+    const correct   = !!data.correct;  // parsePayload側で厳密変換済み
+    if (!sheetName || !id) return outJSON({ ok:false, error:'bad_params' });
+
+    const sh = getSheetByName(sheetName);
+    const last = sh.getLastRow();
+    if (last < 2) return outJSON({ ok:false, error:'no_rows' });
+
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues().map(r => String(r[0]));
+    const idx = ids.indexOf(id);
+    if (idx === -1) return outJSON({ ok:false, error:`id_not_found:${id}` });
+
+    const row = 2 + idx;
+    const colG = 7;
+    sh.getRange(row, colG).setValue(correct ? '' : true);  // 正解＝解除, 不正解＝TRUE
+    SpreadsheetApp.flush();
+
+    return outJSON({ ok:true, row, id, correct });
+  } catch (err) {
+    return outJSON({ ok:false, error: String(err) });
   }
-
-  state.i += 1;
-  if (state.i >= state.rows.length) finishSet();
-  else renderQuestion(state.rows[state.i]);
 }
 
-/***** セット終了表示 *****/
-function finishSet(){
-  const qEl = document.querySelector('#qText');
-  const imgWrap = document.querySelector('#qImageWrap');
-  const idxEl = document.querySelector('#qIndex');
-  const ansEl = document.querySelector('#answerInput');
-  if (qEl) qEl.textContent = 'おしまい！おつかれさま 🙌';
-  if (imgWrap) imgWrap.classList.add('hidden');
-  if (idxEl) idxEl.textContent = `${state.rows.length}`;
-  if (ansEl) ansEl.value = '';
+/***** 受信データを堅牢にパース（JSON/text/plain/form全部OK）*****/
+function parsePayload(e){
+  let body = {};
+  try {
+    if (e && e.postData && e.postData.contents) body = JSON.parse(e.postData.contents);
+  } catch (_) {}
+  const p = (e && e.parameter) || {};
+
+  const toBool = (v) => {
+    if (typeof v === 'boolean') return v;
+    const s = String(v).trim().toLowerCase();
+    return s === 'true' || s === '1';
+  };
+
+  const pick = (k, def=null) => (body[k] !== undefined ? body[k] : (p[k] !== undefined ? p[k] : def));
+
+  return {
+    action:   pick('action', ''),
+    sheetName:pick('sheetName', ''),
+    id:       pick('id', ''),
+    correct:  toBool(pick('correct', false)),
+  };
 }
-
-/***** イベント結線 *****/
-function bindEvents(){
-  // 科目切替
-  document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('[data-subject]');
-    if (!btn) return;
-    const cand = btn.dataset.subject;
-    if (state.subject !== cand){
-      state.subject = cand;
-      document.querySelectorAll('[data-subject]').forEach(b=>{
-        b.classList.toggle('primary', b.dataset.subject === cand);
-      });
-      const subjectTitle = document.querySelector('#subjectTitle');
-      if (subjectTitle) subjectTitle.textContent = cand;
-      showPanel('#subjectPanel');
-      // スコープと週選択リセット
-      state.scope = 'all';
-      state.week = null;
-      document.querySelectorAll('.seg-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.scope === 'all');
-      });
-      const weekSelect = document.querySelector('#weekSelect');
-      if (weekSelect) {
-        weekSelect.classList.add('hidden');
-        weekSelect.value = '';
-      }
-      loadWeeks();
-    }
-  });
-
-  // pool / order 切替
-  document.addEventListener('change', (e)=>{
-    const p = e.target.closest('input[name="pool"]');
-    if (p) state.pool = p.value; // 'all' | 'wrong_blank'
-    const o = e.target.closest('input[name="order"]');
-    if (o) state.order = o.value; // 'random' | 'sequential'
-  });
-
-  // スコープ切替（全授業 / 授業回）
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.seg-btn[data-scope]');
-    if (!btn) return;
-    state.scope = btn.dataset.scope;
-
-    document.querySelectorAll('.seg-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.scope === state.scope);
-    });
-
-    const weekSelect = document.querySelector('#weekSelect');
-    if (state.scope === 'byweek') {
-      weekSelect.classList.remove('hidden');
-      if (!weekSelect.options.length || weekSelect.options.length <= 1) loadWeeks();
-    } else {
-      weekSelect.classList.add('hidden');
-      state.week = null;
-      weekSelect.value = '';
-    }
-  });
-
-  // 授業回選択
-  const weekSelect = document.querySelector('#weekSelect');
-  if (weekSelect) {
-    weekSelect.addEventListener('change', (e) => {
-      state.week = e.target.value || null;
-    });
-  }
-
-  // クイズ開始
-  const startBtn = document.querySelector('#startBtn');
-  if (startBtn) startBtn.addEventListener('click', loadQuestions);
-
-  // メニューへ戻る
-  const backBtn = document.querySelector('#backBtn');
-  if (backBtn) backBtn.addEventListener('click', ()=>{ showPanel('#subjectPanel'); });
-
-  // 送信（EnterでもOK）
-  const input = document.querySelector('#answerInput');
-  if (input) input.addEventListener('keydown', e=>{ if (e.key==='Enter') submitAnswer(); });
-  const sb = document.querySelector('#submitBtn');
-  if (sb) sb.addEventListener('click', () => submitAnswer());
-
-  // わからない＝不正解としてログして次へ
-  const skipBtn = document.querySelector('#skipBtn');
-  if (skipBtn) skipBtn.addEventListener('click', () => submitAnswer(false));
-
-  // 本日ポイントリセット（上下）
-  const rstTop = document.querySelector('#resetTodayTop');
-  if (rstTop) rstTop.addEventListener('click', resetTodayPoint);
-  const rstBottom = document.querySelector('#resetToday');
-  if (rstBottom) rstBottom.addEventListener('click', resetTodayPoint);
-}
-
-function resetTodayPoint(){
-  state.todayCount = 0;
-  saveTodayPoint();
-  const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-  els.forEach(el => { if (el) el.textContent = '0'; });
-}
-
-/***** 初期化 *****/
-window.addEventListener('DOMContentLoaded', ()=>{
-  bindEvents();
-  loadTodayPoint();
-  showPanel('#subjectPanel');
-
-  // 初期科目の見た目
-  const initialSubjectBtn = document.querySelector(`[data-subject="${state.subject}"]`);
-  if (initialSubjectBtn) initialSubjectBtn.classList.add('primary');
-  const subjectTitle = document.querySelector('#subjectTitle');
-  if (subjectTitle) subjectTitle.textContent = state.subject;
-
-  // 授業回リスト読み込み
-  loadWeeks();
-});
