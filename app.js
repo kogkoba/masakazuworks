@@ -9,9 +9,9 @@ const SUBJECTS = {
 
 /***** 状態 *****/
 const state = {
-  subject: "国語",
-  pool: "all",        // all | wrong_blank
-  order: "seq",       // seq | shuffle
+  subject: "国語",   // 初期科目
+  pool: "all",       // all | wrong_blank
+  order: "seq",      // seq | shuffle
   rows: [],
   i: 0,
   todayCount: 0
@@ -26,9 +26,9 @@ function parseAlts(s){
     .filter(Boolean);
 }
 function shuffle(a){
-  for(let i=a.length-1; i>0; i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [a[i], a[j]] = [a[j], a[i]];
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
   }
 }
 const todayKey = () => {
@@ -48,9 +48,9 @@ function saveTodayPoint(){
 }
 
 /***** ステータス表示 *****/
-function setStatus(text){
+function setStatus(txt){
   const st = document.querySelector('#status');
-  if (st) st.textContent = text || '';
+  if (st) st.textContent = txt || '';
 }
 
 /***** 出題の取得 *****/
@@ -58,7 +58,7 @@ async function loadQuestions(){
   const sheetName = SUBJECTS[state.subject].sheetName;
   const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=${state.pool}`;
 
-  setStatus('読み込み中…');
+  setStatus(`読み込み中…（科目：${state.subject}）`);
   try{
     const res = await fetch(url);
     const json = await res.json();
@@ -72,14 +72,14 @@ async function loadQuestions(){
     if (totalEl) totalEl.textContent = `全${state.rows.length}問`;
 
     if (state.rows.length === 0){
-      setStatus('該当の問題がありません（フィルタ設定を見直してね）');
+      setStatus(`「${state.subject}」に該当の問題がありません（フィルタを見直してね）`);
       renderQuestion(null);
       return;
     }
     setStatus('');
     renderQuestion(state.rows[state.i]);
-  }catch(err){
-    console.error(err);
+  }catch(e){
+    console.error(e);
     setStatus('読み込みに失敗しました');
   }
 }
@@ -94,7 +94,7 @@ function renderQuestion(row){
 
   if (!row){
     if (qEl) qEl.textContent = '問題がありません';
-    if (img){ img.removeAttribute('src'); img.style.display = 'none'; }
+    if (img){ img.removeAttribute('src'); img.style.display='none'; }
     if (ans) ans.value = '';
     if (idxEl) idxEl.textContent = '0 / 0';
     if (msgEl) msgEl.textContent = '';
@@ -103,8 +103,8 @@ function renderQuestion(row){
 
   if (qEl) qEl.textContent = row.question;
   if (img){
-    if (row.image_url){ img.src = row.image_url; img.style.display = ''; }
-    else { img.removeAttribute('src'); img.style.display = 'none'; }
+    if (row.image_url){ img.src = row.image_url; img.style.display=''; }
+    else { img.removeAttribute('src'); img.style.display='none'; }
   }
   if (ans){ ans.value=''; ans.focus(); }
   if (idxEl) idxEl.textContent = `${state.i+1} / ${state.rows.length}`;
@@ -127,10 +127,10 @@ async function submitAnswer(){
 
   try{
     await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({
-        action: 'log',
+        action:'log',
         sheetName: SUBJECTS[state.subject].sheetName,
         id: row.id,
         correct
@@ -158,24 +158,33 @@ function finishSet(){
   const img = document.querySelector('#img');
   const idxEl = document.querySelector('#idx');
   if (qEl) qEl.textContent = 'おしまい！おつかれさま 🙌';
-  if (img){ img.removeAttribute('src'); img.style.display = 'none'; }
+  if (img){ img.removeAttribute('src'); img.style.display='none'; }
   if (idxEl) idxEl.textContent = `${state.rows.length} / ${state.rows.length}`;
 }
 
-/***** イベント結線（委譲で拾い漏れ防止） *****/
+/***** イベント結線（委譲+フォールバック） *****/
 function bindEvents(){
-  // 科目切替
+  // 科目切替（data-subject が無い場合はボタンの文字を使う）
   document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('[data-subject]');
+    const btn = e.target.closest('[data-subject], .chip, button');
     if (!btn) return;
-    const sub = btn.dataset.subject;
-    if (!SUBJECTS[sub]) return;
 
-    document.querySelectorAll('[data-subject]').forEach(b=>{
-      b.classList.toggle('primary', b===btn);
+    // data-subject があればそれを、無ければ表示テキストを採用
+    const cand = (btn.dataset && btn.dataset.subject) ? btn.dataset.subject : btn.textContent.trim();
+    if (!cand) return;
+    if (!SUBJECTS[cand]) return;  // 未対応ラベルは無視
+
+    // 見た目
+    document.querySelectorAll('[data-subject], .chip').forEach(b=>{
+      // ラベル一致でハイライト（data-subject優先）
+      const name = (b.dataset && b.dataset.subject) ? b.dataset.subject : b.textContent.trim();
+      b.classList.toggle('primary', name === cand);
     });
-    state.subject = sub;
-    loadQuestions();
+
+    if (state.subject !== cand){
+      state.subject = cand;
+      loadQuestions();
+    }
   });
 
   // フィルタ切替
@@ -186,12 +195,9 @@ function bindEvents(){
     if (o){ state.order = o.value; loadQuestions(); return; }
   });
 
-  // Enter送信
+  // 送信
   const input = document.querySelector('#ans');
-  if (input) input.addEventListener('keydown', e=>{
-    if (e.key === 'Enter') submitAnswer();
-  });
-  // ボタン送信
+  if (input) input.addEventListener('keydown', e=>{ if (e.key==='Enter') submitAnswer(); });
   const sb = document.querySelector('#submit');
   if (sb) sb.addEventListener('click', submitAnswer);
 
@@ -210,16 +216,17 @@ window.addEventListener('DOMContentLoaded', async ()=>{
   bindEvents();
   loadTodayPoint();
 
-  // 初期ボタンの見た目同期
-  const firstBtn =
-    [...document.querySelectorAll('[data-subject]')]
-      .find(b => b.dataset.subject === state.subject) ||
-    document.querySelector('[data-subject]');
-  if (firstBtn){
-    document.querySelectorAll('[data-subject]').forEach(b=>{
-      b.classList.toggle('primary', b===firstBtn);
+  // 初期ボタンの見た目同期（data-subject 無くてもOK）
+  const buttons = [...document.querySelectorAll('[data-subject], .chip, button')];
+  const first = buttons.find(b => {
+    const name = (b.dataset && b.dataset.subject) ? b.dataset.subject : b.textContent.trim();
+    return name === state.subject;
+  });
+  if (first){
+    buttons.forEach(b=>{
+      const name = (b.dataset && b.dataset.subject) ? b.dataset.subject : b.textContent.trim();
+      b.classList.toggle('primary', b === first || name === state.subject);
     });
-    state.subject = firstBtn.dataset.subject;
   }
 
   await loadQuestions();
