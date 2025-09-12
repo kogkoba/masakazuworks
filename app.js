@@ -1,6 +1,7 @@
 console.log('[quiz-app] boot');
 
-/***** 設定 *****/
+/***** 設定 *****/// ここを新URLに置き換え
+
 const GAS_URL = "https://script.google.com/macros/s/https://script.google.com/macros/s/AKfycbx51jPktIPrLQ-Dc8lmhkLn7RAOf8fcLy6vGqpkBEFxGAcHaTEgwpqr_gEnEj7pLDscrw/exec";
 
 const SUBJECTS = {
