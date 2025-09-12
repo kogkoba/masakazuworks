@@ -7,7 +7,7 @@ const LS_TODAY = `revquiz:points:${new Date().toISOString().slice(0,10)}`;
 // 科目ごとの正誤フラグ保存
 const LS_KEY = (subject) => `revquiz:${subject}:progress`; // { [id]: "TRUE"|"FALSE"|"" }
 
-// ===== DOM取得（存在しない時もあるので必ずnullチェックする） =====
+// ===== DOM取得（nullセーフ） =====
 const subjectPanel = document.getElementById('subjectPanel');
 const subjectTitle = document.getElementById('subjectTitle');
 const weekSelect   = document.getElementById('weekSelect');
@@ -35,12 +35,12 @@ const submitBtn = document.getElementById('submitBtn');
 const skipBtn   = document.getElementById('skipBtn');
 const nextBtn   = document.getElementById('nextBtn');
 
-// セグメント（存在しなければ null のまま）
+// セグメント
 const segAllBtn  = document.querySelector('.seg-btn[data-scope="all"]');
 const segWeekBtn = document.querySelector('.seg-btn[data-scope="byweek"]');
 
 let currentSubject = null;
-let allRows = [];       // 全件（enabledのみ）
+let allRows = [];       // 全件
 let quizRows = [];      // 出題用
 let order = 'random';   // random | sequential
 let pool  = 'all';      // all | wrong_or_blank
@@ -72,18 +72,19 @@ updateTodayCounters();
 // ===== CSVユーティリティ =====
 const csvParse = (csvText) => {
   const lines = csvText.replace(/\r/g,'').split('\n');
-  const headers = splitCSVLine(lines[0]);
+  const headers = splitCSVLine(lines[0] || '');
   const rows = [];
   for(let i=1;i<lines.length;i++){
     if(!lines[i]?.trim()) continue;
     const cols = splitCSVLine(lines[i]);
     const obj = {};
-    headers.forEach((h,idx)=> obj[h.trim()] = (cols[idx]||'').trim());
+    headers.forEach((h,idx)=> obj[h.trim()] = (cols[idx]??'').toString().trim());
     rows.push(obj);
   }
   return rows;
 };
 
+// カンマ・クォート対応の1行パーサ
 function splitCSVLine(line){
   const out=[]; let cur=''; let inQ=false;
   for(let i=0;i<line.length;i++){
@@ -98,15 +99,23 @@ function splitCSVLine(line){
   return out;
 }
 
+// enabledの解釈（空=有効、FALSE/0/NO/無効のみ無効）
+function parseEnabled(v){
+  const s=(v||'').toString().trim().toUpperCase();
+  if(s==='') return true;
+  if(['FALSE','F','0','OFF','NO','無効'].includes(s)) return false;
+  return true;
+}
+
 function normalizeRow(r){
   return {
-    id: r[CFG.columnMap.id],
-    week: r[CFG.columnMap.week],
-    question: r[CFG.columnMap.question],
-    answer: r[CFG.columnMap.answer],
-    alt: r[CFG.columnMap.alt] || "",
-    img: r[CFG.columnMap.img] || "",
-    enabled: (r[CFG.columnMap.enabled]||"").toUpperCase()==="TRUE"
+    id: (r[CFG.columnMap.id]||'').trim(),
+    week: (r[CFG.columnMap.week]||'').trim(),
+    question: (r[CFG.columnMap.question]||'').trim(),
+    answer: (r[CFG.columnMap.answer]||'').trim(),
+    alt: (r[CFG.columnMap.alt]||'').trim(),
+    img: (r[CFG.columnMap.img]||'').trim(),
+    enabled: parseEnabled(r[CFG.columnMap.enabled])
   };
 }
 
@@ -119,6 +128,7 @@ function setProgress(subject, prog){
   localStorage.setItem(LS_KEY(subject), JSON.stringify(prog));
 }
 function markResult(subject, id, isCorrect){
+  if(!id) return;
   const p = getProgress(subject);
   p[id] = isCorrect ? "TRUE" : "FALSE";
   setProgress(subject, p);
@@ -135,16 +145,17 @@ function orderize(rows){
   return rows.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 }
 
-// ===== セグメントUI（nullでも落ちない） =====
+// ===== セグメントUI =====
 function setScope(newScope){
   scope = newScope;
   document.querySelectorAll('.seg-btn').forEach(b=>b.classList.toggle('active', b.dataset.scope===scope));
   weekSelect?.classList.toggle('hidden', scope!=='byweek');
 }
-segAllBtn?.addEventListener('click', ()=> setScope('all'));
-segWeekBtn?.addEventListener('click', ()=> setScope('byweek'));
+document.querySelectorAll('.seg-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=> setScope(btn.dataset.scope));
+});
 
-// ===== ラジオ（存在する場合のみ） =====
+// ===== ラジオ =====
 document.querySelectorAll('input[name="pool"]').forEach(r=>{
   r.addEventListener('change', ()=> pool = r.value);
 });
@@ -156,7 +167,7 @@ document.querySelectorAll('input[name="order"]').forEach(r=>{
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', async ()=>{
     currentSubject = btn.dataset.subject;
-    subjectTitle && (subjectTitle.textContent = `科目：${currentSubject}`);
+    if(subjectTitle) subjectTitle.textContent = `科目：${currentSubject}`;
     subjectPanel?.classList.remove('hidden');
 
     // 現在の選択状態
@@ -168,21 +179,40 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     // データ取得
     const url = SHEET_BASE + encodeURIComponent(currentSubject);
     const csv = await fetch(url).then(r=>r.text());
-    const rows = csvParse(csv).map(normalizeRow).filter(r=>r.enabled);
+    const rows = csvParse(csv).map(normalizeRow)
+                  .filter(r => r.question && r.answer && r.enabled !== false);
 
     allRows = rows;
 
-    // 授業回プルダウン（week列ユニーク）
+    // 授業回プルダウン（week列ユニーク + 件数表示 + 自然順）
+    const buckets = allRows.reduce((m, r) => {
+      const w = (r.week || '').trim();
+      if (!w) return m;
+      m[w] = (m[w] || 0) + 1;
+      return m;
+    }, {});
+    const forced = (CFG.forceWeeks && CFG.forceWeeks[currentSubject]) || null;
+    const weeks = forced || Object.keys(buckets).sort(naturalCompare);
+
     if(weekSelect){
-      const weeks = Array.from(new Set(rows.map(r=>r.week))).sort();
-      weekSelect.innerHTML = `<option value="">授業回を選択</option>` + weeks.map(w=> `<option>${w}</option>`).join('');
+      weekSelect.innerHTML =
+        `<option value="">授業回を選択</option>` +
+        weeks.map(w => {
+          const n = buckets[w] ?? '';
+          return `<option value="${w}">${w}${n ? `（${n}問）` : ''}</option>`;
+        }).join('');
     }
-    // 初期表示は「小４全授業」
+    // 既定は「小４全授業」
     setScope('all');
 
     updateTodayCounters();
   });
 });
+
+// 文字列中の数字を考慮した自然順ソート
+function naturalCompare(a, b) {
+  return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+}
 
 // ===== スタート =====
 startBtn?.addEventListener('click', ()=>{
@@ -199,7 +229,7 @@ startBtn?.addEventListener('click', ()=>{
 
   quizRows = rows;
   seqIndex = 0;
-  qTotalEl && (qTotalEl.textContent = quizRows.length);
+  if(qTotalEl) qTotalEl.textContent = quizRows.length;
   showQuestion(0);
   subjectPanel?.classList.add('hidden');
   quizPanel?.classList.remove('hidden');
@@ -228,15 +258,17 @@ function cur(){ return quizRows[seqIndex]; }
 function showQuestion(idx){
   seqIndex = idx;
   const row = cur();
-  qIndexEl && (qIndexEl.textContent = (idx+1));
-  qWeekEl  && (qWeekEl.textContent = row.week ? `（${row.week}）` : '');
-  qText    && (qText.textContent = row.question || '');
+  if(qIndexEl) qIndexEl.textContent = (idx+1);
+  if(qWeekEl)  qWeekEl.textContent = row.week ? `（${row.week}）` : '';
+  if(qText)    qText.textContent = row.question || '';
+
   if(row.img && qImage && qImageWrap){
     qImage.src = row.img;
     qImageWrap.classList.remove('hidden');
   }else{
     qImageWrap?.classList.add('hidden');
   }
+
   if(answerInput){
     answerInput.value = '';
     answerInput.focus();
@@ -297,3 +329,4 @@ function next(){
     updateTodayCounters();
   }
 }
+
