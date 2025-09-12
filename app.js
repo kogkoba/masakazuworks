@@ -1,10 +1,10 @@
 console.log('[quiz-app] boot');
 
-/***** 設定：あなたの最新 /exec URL をセット *****/
+/***** 設定：最新 /exec URL をセット *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxw1_oqKmaY1plPI0fz8e-_9Fd-WgL8smWSTNpq2-qwWBDTNSbvKP0ymsOfex7dRsgmWg/exec";
 console.log('[quiz-app] GAS_URL =', GAS_URL);
 
-/***** タブごとの gid（こぐれさん提供）*****/
+/***** タブごとの gid *****/
 const SUBJECTS = {
   "算数": { gid: 0 },
   "国語": { gid: 162988483 },
@@ -12,7 +12,7 @@ const SUBJECTS = {
   "社会": { gid: 2143649641 },
 };
 
-/***** JSONP ユーティリティ *****/
+/***** JSONP *****/
 function jsonp(url) {
   return new Promise((resolve, reject) => {
     const cb = "__cb_" + Math.random().toString(36).slice(2);
@@ -47,6 +47,8 @@ const state = {
   rows: [],
   i: 0,
   todayCount: 0,
+  phase: "answer",       // "answer" or "next"
+  busy: false            // 二重操作防止
 };
 
 /***** ユーティリティ *****/
@@ -79,7 +81,7 @@ function saveTodayPoint(){
   localStorage.setItem(todayKey(), String(state.todayCount));
 }
 
-/***** 表示切替とステータス *****/
+/***** 画面ヘルパ *****/
 function showPanel(panelId) {
   document.querySelector('#subjectPanel').classList.add('hidden');
   document.querySelector('#quizPanel').classList.add('hidden');
@@ -89,8 +91,13 @@ function setStatus(txt){
   const st = document.querySelector('#status');
   if (st) st.textContent = txt || '';
 }
+function setNextVisible(v){
+  const nextBtn = document.querySelector('#nextBtn');
+  if (!nextBtn) return;
+  nextBtn.classList.toggle('hidden', !v);
+}
 
-/***** 授業回の選択肢を生成（JSONP）*****/
+/***** 授業回の選択肢を生成 *****/
 async function loadWeeks() {
   const gid = SUBJECTS[state.subject].gid;
   const url = `${GAS_URL}?action=get&gid=${gid}&pool=all`;
@@ -116,7 +123,7 @@ async function loadWeeks() {
   }
 }
 
-/***** 出題の取得（JSONP）*****/
+/***** 出題の取得 *****/
 async function loadQuestions(){
   const gid = SUBJECTS[state.subject].gid;
   const url = `${GAS_URL}?action=get&gid=${gid}&pool=${encodeURIComponent(state.pool)}`;
@@ -185,48 +192,93 @@ function renderQuestion(row){
   if (idxEl) idxEl.textContent = `${state.i+1}`;
   if (feedbackEl){ feedbackEl.textContent = ''; feedbackEl.classList.remove('ok','ng'); }
   if (weekEl) weekEl.textContent = row.week ? String(row.week) : '';
+
+  state.phase = "answer";
+  setNextVisible(false); // 判定前は次へボタンを隠す
 }
 
-/***** 回答処理 → GETでログ（JSONP）*****/
-async function submitAnswer(correctOverride=null){
+/***** ログ書き込み（result: correct|wrong|skip）*****/
+async function logResult(row, result){
+  const gid = SUBJECTS[state.subject].gid;
+  const url = `${GAS_URL}?action=log&gid=${gid}&id=${encodeURIComponent(row.id)}&result=${encodeURIComponent(result)}`;
+  try{
+    const res = await jsonp(url);
+    console.log('[logResult]', result, res);
+    return res && res.ok;
+  }catch(e){
+    console.error('log failed', e);
+    return false;
+  }
+}
+
+/***** 答えの判定＆保存 → 次へ待機 *****/
+async function submitAnswer(kind = 'answer'){ // 'answer' | 'skip'
+  if (state.busy) return;
   if (state.i >= state.rows.length) return;
 
   const row = state.rows[state.i];
-  const ansEl = document.querySelector('#answerInput');
-  const user = norm(ansEl ? ansEl.value : '');
-
-  const corrects = new Set([norm(row.answer), ...parseAlts(row.alt_answers)]);
-  const correct = (correctOverride === null) ? corrects.has(user) : !!correctOverride;
-
   const feedbackEl = document.querySelector('#feedback');
-  if (feedbackEl) {
-    feedbackEl.textContent = correct ? '正解！' : `不正解… 正：${row.answer}`;
-    feedbackEl.classList.toggle('ok', correct);
-    feedbackEl.classList.toggle('ng', !correct);
+  const ansEl = document.querySelector('#answerInput');
+
+  // すでに判定済みなら無視
+  if (state.phase !== "answer") return;
+
+  state.busy = true;
+
+  let result = 'skip';
+  if (kind === 'answer') {
+    const user = norm(ansEl ? ansEl.value : '');
+    const corrects = new Set([norm(row.answer), ...parseAlts(row.alt_answers)]);
+    const isCorrect = corrects.has(user);
+    result = isCorrect ? 'correct' : 'wrong';
+
+    if (feedbackEl) {
+      feedbackEl.textContent = isCorrect ? '正解！' : `不正解… 正：${row.answer}`;
+      feedbackEl.classList.toggle('ok', isCorrect);
+      feedbackEl.classList.toggle('ng', !isCorrect);
+    }
+
+    // 正解ならポイント加算
+    if (isCorrect){
+      state.todayCount += 1;
+      saveTodayPoint();
+      [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
+        .forEach(el => { if (el) el.textContent = String(state.todayCount); });
+    }
+  } else {
+    // スキップ
+    if (feedbackEl) {
+      feedbackEl.textContent = 'スキップしました';
+      feedbackEl.classList.remove('ok','ng');
+    }
   }
 
-  try {
-    const gid = SUBJECTS[state.subject].gid;
-    const url = `${GAS_URL}?action=log&gid=${gid}&id=${encodeURIComponent(row.id)}&correct=${correct ? '1' : '0'}`;
-    const res = await jsonp(url);
-    console.log('[submitAnswer] log result:', res);
-  } catch(e){
-    console.error('log failed', e);
-  }
+  await logResult(row, result);
 
-  if (correct){
-    state.todayCount += 1;
-    saveTodayPoint();
-    [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
-      .forEach(el => { if (el) el.textContent = String(state.todayCount); });
-  }
-
-  state.i += 1;
-  if (state.i >= state.rows.length) finishSet();
-  else renderQuestion(state.rows[state.i]);
+  // 次へ待機モード
+  state.phase = "next";
+  setNextVisible(true);
+  state.busy = false;
 }
 
-/***** セット終了表示 *****/
+/***** 次の問題へ（1回だけ進む）*****/
+function goNext(){
+  if (state.busy) return;
+  if (state.phase !== "next") return;
+
+  state.busy = true;
+
+  state.i += 1;
+  if (state.i >= state.rows.length) {
+    finishSet();
+  } else {
+    renderQuestion(state.rows[state.i]);
+  }
+
+  state.busy = false;
+}
+
+/***** セット終了 *****/
 function finishSet(){
   const qEl = document.querySelector('#qText');
   const imgWrap = document.querySelector('#qImageWrap');
@@ -236,10 +288,13 @@ function finishSet(){
   if (imgWrap) imgWrap.classList.add('hidden');
   if (idxEl) idxEl.textContent = `${state.rows.length}`;
   if (ansEl) ansEl.value = '';
+  state.phase = "answer";
+  setNextVisible(false);
 }
 
-/***** イベント結線（同じ科目でもパネルを開く）*****/
+/***** イベント結線 *****/
 function bindEvents(){
+  // 科目切替
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('[data-subject]');
     if (!btn) return;
@@ -267,13 +322,15 @@ function bindEvents(){
     if (changed || (weekSelect && weekSelect.options.length <= 1)) loadWeeks();
   });
 
+  // pool / order
   document.addEventListener('change', (e)=>{
     const p = e.target.closest('input[name="pool"]');
-    if (p) state.pool = p.value;
+    if (p) state.pool = p.value; // 'all' | 'wrong_blank'
     const o = e.target.closest('input[name="order"]');
-    if (o) state.order = o.value;
+    if (o) state.order = o.value; // 'random' | 'sequential'
   });
 
+  // スコープ切替
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn[data-scope]');
     if (!btn) return;
@@ -292,6 +349,7 @@ function bindEvents(){
     }
   });
 
+  // 授業回選択
   const weekSelect = document.querySelector('#weekSelect');
   if (weekSelect) {
     weekSelect.addEventListener('change', (e) => {
@@ -299,24 +357,33 @@ function bindEvents(){
     });
   }
 
-  const startBtn = document.querySelector('#startBtn');
-  if (startBtn) startBtn.addEventListener('click', loadQuestions);
+  // クイズ開始
+  document.querySelector('#startBtn')?.addEventListener('click', loadQuestions);
 
-  const backBtn = document.querySelector('#backBtn');
-  if (backBtn) backBtn.addEventListener('click', ()=>{ showPanel('#subjectPanel'); });
+  // メニューへ戻る
+  document.querySelector('#backBtn')?.addEventListener('click', ()=>{ showPanel('#subjectPanel'); });
 
+  // 送信（Enterはフェーズ別に動作）
   const input = document.querySelector('#answerInput');
-  if (input) input.addEventListener('keydown', e=>{ if (e.key==='Enter') submitAnswer(); });
-  const sb = document.querySelector('#submitBtn');
-  if (sb) sb.addEventListener('click', () => submitAnswer());
+  if (input) {
+    input.addEventListener('keydown', e=>{
+      if (e.key === 'Enter') {
+        if (state.phase === 'answer') submitAnswer('answer');
+        else if (state.phase === 'next') goNext();
+      }
+    });
+  }
+  document.querySelector('#submitBtn')?.addEventListener('click', () => submitAnswer('answer'));
 
-  const skipBtn = document.querySelector('#skipBtn');
-  if (skipBtn) skipBtn.addEventListener('click', () => submitAnswer(false));
+  // わからない＝空白で保存
+  document.querySelector('#skipBtn')?.addEventListener('click', () => submitAnswer('skip'));
 
-  const rstTop = document.querySelector('#resetTodayTop');
-  if (rstTop) rstTop.addEventListener('click', resetTodayPoint);
-  const rstBottom = document.querySelector('#resetToday');
-  if (rstBottom) rstBottom.addEventListener('click', resetTodayPoint);
+  // 次へ（▶）
+  document.querySelector('#nextBtn')?.addEventListener('click', () => goNext());
+
+  // 本日ポイントリセット
+  document.querySelector('#resetTodayTop')?.addEventListener('click', resetTodayPoint);
+  document.querySelector('#resetToday')?.addEventListener('click', resetTodayPoint);
 }
 
 function resetTodayPoint(){
