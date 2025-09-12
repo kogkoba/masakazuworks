@@ -10,9 +10,10 @@ h2.step{margin:0 0 10px;font-size:18px;opacity:.95}
 .today-counter{display:flex;align-items:center;gap:10px}
 .today-counter button{padding:6px 10px}
 
-.tabs{display:flex;gap:8px;flex-wrap:wrap}
-.tab-btn{background:#1e2a54;border:1px solid #44548f;color:#fff;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:600}
-.tab-btn:hover{filter:brightness(1.1)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{background:#1e2a54;border:1px solid #44548f;color:#fff;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:600}
+.chip:hover{filter:brightness(1.1)}
+.chip.primary{background:#4fc3f7;color:#000;border:none;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer}
 
 .seg{display:inline-flex;background:#0f1837;border:1px solid #2f3d70;border-radius:10px;overflow:hidden}
 .seg-btn{background:transparent;color:#fff;padding:8px 14px;border:none;cursor:pointer}
@@ -32,8 +33,8 @@ h2.step{margin:0 0 10px;font-size:18px;opacity:.95}
 .counter{display:flex;align-items:center;gap:10px}
 
 .quiz-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.q-image{margin:8px 0}
-.q-image img{max-width:100%;border-radius:10px;border:1px solid #334}
+.q-image-wrap{margin:8px 0}
+.q-image-wrap img{max-width:100%;border-radius:10px;border:1px solid #334}
 .q-text{font-size:1.1rem;line-height:1.7;margin:8px 0 4px;white-space:pre-wrap}
 .answer-row{display:flex;gap:8px;align-items:center}
 #answerInput{flex:1;padding:12px;border-radius:10px;border:none;background:#0f1837;color:#fff;font-size:1.05rem}
@@ -43,4 +44,3 @@ h2.step{margin:0 0 10px;font-size:18px;opacity:.95}
 .nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
 
 .foot{opacity:.7;margin-top:20px;text-align:center}
-
