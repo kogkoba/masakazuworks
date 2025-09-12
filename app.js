@@ -14,7 +14,9 @@ const state = {
   order: "random",      // random | sequential
   rows: [],
   i: 0,
-  todayCount: 0
+  todayCount: 0,
+  scope: 'all', // all | byweek
+  week: null,
 };
 
 /***** ユーティリティ *****/
@@ -77,6 +79,11 @@ async function loadQuestions(){
     if (state.order === 'random') shuffle(state.rows);
     state.i = 0;
 
+    // 授業回フィルタを適用
+    if (state.scope === 'byweek' && state.week) {
+      state.rows = state.rows.filter(row => row.week === state.week);
+    }
+
     const totalEl = document.querySelector('#qTotal');
     if (totalEl) totalEl.textContent = `${state.rows.length}`;
     
@@ -101,6 +108,7 @@ function renderQuestion(row){
   const ansEl = document.querySelector('#answerInput');
   const idxEl = document.querySelector('#qIndex');
   const feedbackEl = document.querySelector('#feedback');
+  const weekEl = document.querySelector('#qWeek');
 
   if (!row){
     if (qEl) qEl.textContent = '問題がありません';
@@ -108,6 +116,7 @@ function renderQuestion(row){
     if (ansEl) ansEl.value = '';
     if (idxEl) idxEl.textContent = '0';
     if (feedbackEl) feedbackEl.textContent = '';
+    if (weekEl) weekEl.textContent = '';
     return;
   }
 
@@ -119,6 +128,7 @@ function renderQuestion(row){
   if (ansEl){ ansEl.value=''; ansEl.focus(); }
   if (idxEl) idxEl.textContent = `${state.i+1}`;
   if (feedbackEl) feedbackEl.textContent = '';
+  if (weekEl) weekEl.textContent = row.week || '';
 }
 
 /***** 回答処理 → G列ログ（正解→空白 / 不正解→TRUE） *****/
@@ -180,6 +190,34 @@ function finishSet(){
   if (ansEl) ansEl.value = '';
 }
 
+/***** 授業回の選択肢を生成 *****/
+async function loadWeeks() {
+  const sheetName = SUBJECTS[state.subject].sheetName;
+  const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=all`;
+  
+  try {
+    const res = await fetch(url);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'fetch_error');
+    
+    const rows = Array.isArray(json.rows) ? json.rows : [];
+    const weeks = [...new Set(rows.map(row => row.week).filter(Boolean))].sort();
+
+    const weekSelect = document.querySelector('#weekSelect');
+    if (weekSelect) {
+      weekSelect.innerHTML = '<option value="">- 授業回を選択 -</option>';
+      weeks.forEach(week => {
+        const option = document.createElement('option');
+        option.value = week;
+        option.textContent = week;
+        weekSelect.appendChild(option);
+      });
+    }
+  } catch(e) {
+    console.error('Failed to load weeks', e);
+  }
+}
+
 /***** イベント結線 *****/
 function bindEvents(){
   // 科目切替
@@ -196,6 +234,7 @@ function bindEvents(){
       const subjectTitle = document.querySelector('#subjectTitle');
       if (subjectTitle) subjectTitle.textContent = cand;
       showPanel('#subjectPanel');
+      loadWeeks();
     }
   });
 
@@ -206,7 +245,32 @@ function bindEvents(){
     const o = e.target.closest('input[name="order"]');
     if (o) state.order = o.value;
   });
-  
+
+  // スコープ切替（全授業/授業回）
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg-btn[data-scope]');
+    if (!btn) return;
+
+    state.scope = btn.dataset.scope;
+    
+    document.querySelectorAll('.seg-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.scope === state.scope);
+    });
+
+    const weekSelect = document.querySelector('#weekSelect');
+    if (state.scope === 'byweek') {
+      weekSelect.classList.remove('hidden');
+    } else {
+      weekSelect.classList.add('hidden');
+      state.week = null; // 授業回選択をリセット
+    }
+  });
+
+  // 授業回選択
+  document.querySelector('#weekSelect').addEventListener('change', (e) => {
+    state.week = e.target.value;
+  });
+
   // クイズ開始ボタン
   document.querySelector('#startBtn').addEventListener('click', loadQuestions);
 
@@ -248,4 +312,7 @@ window.addEventListener('DOMContentLoaded', async ()=>{
     const subjectTitle = document.querySelector('#subjectTitle');
     if (subjectTitle) subjectTitle.textContent = state.subject;
   }
+  
+  // 初期化時に授業回を読み込む
+  loadWeeks();
 });
