@@ -1,22 +1,46 @@
-console.log('[quiz-app] boot'); // 起動確認ログ
+console.log('[quiz-app] boot');
 
 /***** 設定 *****/
-// こぐれさんの最新デプロイURL
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzwO8zzHkZTKsWihKeJiEZmWXRRGPcgo80c5Btgv_AI7J9o65-KFPbLuKaXXVSO_uimCQ/exec";
+const GAS_URL = "https://script.google.com/macros/s/https://script.google.com/macros/s/AKfycbx51jPktIPrLQ-Dc8lmhkLn7RAOf8fcLy6vGqpkBEFxGAcHaTEgwpqr_gEnEj7pLDscrw/exec";
 
 const SUBJECTS = {
-  "算数": { sheetName: "算数" },
-  "国語": { sheetName: "国語" },
-  "理科": { sheetName: "理科" },
-  "社会": { sheetName: "社会" },
+  "算数": { gid: 0 },
+  "国語": { gid: 162988483 },
+  "理科": { gid: 1839969673 },
+  "社会": { gid: 2143649641 },
 };
+
+/***** JSONP ユーティリティ *****/
+function jsonp(url) {
+  return new Promise((resolve, reject) => {
+    const cb = "__cb_" + Math.random().toString(36).slice(2);
+    const s = document.createElement('script');
+    const sep = url.includes('?') ? '&' : '?';
+    s.src = url + sep + 'callback=' + cb;
+    s.async = true;
+
+    window[cb] = (data) => {
+      try { resolve(data); }
+      finally {
+        delete window[cb];
+        document.body.removeChild(s);
+      }
+    };
+    s.onerror = () => {
+      delete window[cb];
+      document.body.removeChild(s);
+      reject(new Error('jsonp_error'));
+    };
+    document.body.appendChild(s);
+  });
+}
 
 /***** 状態 *****/
 const state = {
-  subject: "国語",        // 初期表示で国語を選択
-  pool: "all",            // all | wrong_blank
-  order: "random",        // random | sequential
-  scope: "all",           // all | byweek
+  subject: "国語",
+  pool: "all",           // all | wrong_blank
+  order: "random",       // random | sequential
+  scope: "all",          // all | byweek
   week: null,
   rows: [],
   i: 0,
@@ -27,7 +51,7 @@ const state = {
 const norm = s => String(s ?? '').trim().replace(/\s+/g, '');
 function parseAlts(s){
   return String(s ?? '')
-    .split(/[|｜,，；;／/・\s]+/)   // 区切り文字いろいろ対応
+    .split(/[|｜,，；;／/・\s]+/)
     .map(x => norm(x))
     .filter(Boolean);
 }
@@ -46,37 +70,31 @@ const todayKey = () => {
 function loadTodayPoint(){
   const v = Number(localStorage.getItem(todayKey()) || 0);
   state.todayCount = Number.isFinite(v) ? v : 0;
-  const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-  els.forEach(el => { if (el) el.textContent = String(state.todayCount); });
+  [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
+    .forEach(el => { if (el) el.textContent = String(state.todayCount); });
 }
 function saveTodayPoint(){
   localStorage.setItem(todayKey(), String(state.todayCount));
 }
 
-/***** 表示切替 *****/
+/***** 表示切替とステータス *****/
 function showPanel(panelId) {
   document.querySelector('#subjectPanel').classList.add('hidden');
   document.querySelector('#quizPanel').classList.add('hidden');
   document.querySelector(panelId).classList.remove('hidden');
 }
-
-/***** ステータス *****/
 function setStatus(txt){
   const st = document.querySelector('#status');
   if (st) st.textContent = txt || '';
 }
 
-/***** 授業回の選択肢を生成 *****/
+/***** 授業回の選択肢を生成（JSONP）*****/
 async function loadWeeks() {
-  const sheetName = SUBJECTS[state.subject].sheetName;
-  const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=all`;
-
+  const gid = SUBJECTS[state.subject].gid;
+  const url = `${GAS_URL}?action=get&gid=${gid}&pool=all`;
   try {
-    const res = await fetch(url);
-    console.log('[loadWeeks] GET', url, res.status);
-    const json = await res.json();
-    console.log('[loadWeeks] rows=', json.rows?.length);
-
+    const json = await jsonp(url);
+    console.log('[loadWeeks]', json);
     if (!json.ok) throw new Error(json.error || 'fetch_error');
 
     const rows = Array.isArray(json.rows) ? json.rows : [];
@@ -97,28 +115,22 @@ async function loadWeeks() {
   }
 }
 
-/***** 出題の取得 *****/
+/***** 出題の取得（JSONP）*****/
 async function loadQuestions(){
-  const sheetName = SUBJECTS[state.subject].sheetName;
-  const url = `${GAS_URL}?action=get&sheetName=${encodeURIComponent(sheetName)}&pool=${encodeURIComponent(state.pool)}`;
+  const gid = SUBJECTS[state.subject].gid;
+  const url = `${GAS_URL}?action=get&gid=${gid}&pool=${encodeURIComponent(state.pool)}`;
 
   setStatus(`読み込み中…（科目：${state.subject}）`);
   try{
-    const res = await fetch(url);
-    console.log('[loadQuestions] GET', url, res.status);
-    const json = await res.json();
-    console.log('[loadQuestions] rows=', json.rows?.length);
-
+    const json = await jsonp(url);
+    console.log('[loadQuestions]', json);
     if (!json.ok) throw new Error(json.error || 'fetch_error');
 
     let rows = Array.isArray(json.rows) ? json.rows : [];
-
-    // 授業回フィルタ
     if (state.scope === 'byweek' && state.week) {
       rows = rows.filter(row => String(row.week) === String(state.week));
     }
-
-    if (state.order === 'random') shuffle(rows); // sequentialなら並べ替えなし
+    if (state.order === 'random') shuffle(rows);
     state.rows = rows;
     state.i = 0;
 
@@ -175,7 +187,7 @@ function renderQuestion(row){
   if (weekEl) weekEl.textContent = row.week ? String(row.week) : '';
 }
 
-/***** 回答処理（G列ログ：正解→空白 / 不正解→TRUE） *****/
+/***** 回答処理 → GETでログ（JSONP）*****/
 async function submitAnswer(correctOverride=null){
   if (state.i >= state.rows.length) return;
 
@@ -193,18 +205,12 @@ async function submitAnswer(correctOverride=null){
     feedbackEl.classList.toggle('ng', !correct);
   }
 
+  // JSONPでログ（GET）
   try {
-    const res = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action:'log',
-        sheetName: SUBJECTS[state.subject].sheetName,
-        id: row.id,
-        correct
-      })
-    });
-    res.json().then(j => console.log('[submitAnswer] log result:', j)).catch(()=>{});
+    const gid = SUBJECTS[state.subject].gid;
+    const url = `${GAS_URL}?action=log&gid=${gid}&id=${encodeURIComponent(row.id)}&correct=${correct ? '1' : '0'}`;
+    const res = await jsonp(url);
+    console.log('[submitAnswer] log result:', res);
   } catch(e){
     console.error('log failed', e);
   }
@@ -212,8 +218,8 @@ async function submitAnswer(correctOverride=null){
   if (correct){
     state.todayCount += 1;
     saveTodayPoint();
-    const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-    els.forEach(el => { if (el) el.textContent = String(state.todayCount); });
+    [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
+      .forEach(el => { if (el) el.textContent = String(state.todayCount); });
   }
 
   state.i += 1;
@@ -233,49 +239,39 @@ function finishSet(){
   if (ansEl) ansEl.value = '';
 }
 
-/***** イベント結線 *****/
+/***** イベント結線（同じ科目でもパネルを開く）*****/
 function bindEvents(){
-// 科目切替（差し替え版）
-document.addEventListener('click', (e)=>{
-  const btn = e.target.closest('[data-subject]');
-  if (!btn) return;
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-subject]');
+    if (!btn) return;
 
-  const cand = btn.dataset.subject;
-  const changed = (state.subject !== cand);
-  state.subject = cand;  // 同一科目でも更新扱いにしてOK
+    const cand = btn.dataset.subject;
+    const changed = (state.subject !== cand);
+    state.subject = cand;
 
-  // 見た目（primary）を更新
-  document.querySelectorAll('[data-subject]').forEach(b=>{
-    b.classList.toggle('primary', b.dataset.subject === cand);
+    document.querySelectorAll('[data-subject]').forEach(b=>{
+      b.classList.toggle('primary', b.dataset.subject === cand);
+    });
+
+    const subjectTitle = document.querySelector('#subjectTitle');
+    if (subjectTitle) subjectTitle.textContent = cand;
+    showPanel('#subjectPanel');
+
+    state.scope = 'all';
+    state.week = null;
+    document.querySelectorAll('.seg-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.scope === 'all');
+    });
+    const weekSelect = document.querySelector('#weekSelect');
+    if (weekSelect) {
+      weekSelect.classList.add('hidden');
+      weekSelect.value = '';
+    }
+
+    if (changed) loadWeeks();
+    else if (!weekSelect || weekSelect.options.length <= 1) loadWeeks();
   });
 
-  // タイトル更新＆パネルを必ず開く
-  const subjectTitle = document.querySelector('#subjectTitle');
-  if (subjectTitle) subjectTitle.textContent = cand;
-  showPanel('#subjectPanel');
-
-  // スコープと週選択は毎回リセットして分かりやすく
-  state.scope = 'all';
-  state.week = null;
-  document.querySelectorAll('.seg-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.scope === 'all');
-  });
-  const weekSelect = document.querySelector('#weekSelect');
-  if (weekSelect) {
-    weekSelect.classList.add('hidden');
-    weekSelect.value = '';
-  }
-
-  // 授業回リストは、科目が変わった時だけ読み直し
-  if (changed) {
-    loadWeeks();
-  } else {
-    // 同一科目クリックでも、まだ未取得なら読み込み
-    if (!weekSelect || weekSelect.options.length <= 1) loadWeeks();
-  }
-});
-
-  // pool / order 切替
   document.addEventListener('change', (e)=>{
     const p = e.target.closest('input[name="pool"]');
     if (p) state.pool = p.value;
@@ -283,14 +279,15 @@ document.addEventListener('click', (e)=>{
     if (o) state.order = o.value;
   });
 
-  // スコープ切替
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn[data-scope]');
     if (!btn) return;
     state.scope = btn.dataset.scope;
+
     document.querySelectorAll('.seg-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.scope === state.scope);
     });
+
     const weekSelect = document.querySelector('#weekSelect');
     if (state.scope === 'byweek') {
       weekSelect.classList.remove('hidden');
@@ -302,7 +299,6 @@ document.addEventListener('click', (e)=>{
     }
   });
 
-  // 授業回選択
   const weekSelect = document.querySelector('#weekSelect');
   if (weekSelect) {
     weekSelect.addEventListener('change', (e) => {
@@ -310,25 +306,20 @@ document.addEventListener('click', (e)=>{
     });
   }
 
-  // クイズ開始
   const startBtn = document.querySelector('#startBtn');
   if (startBtn) startBtn.addEventListener('click', loadQuestions);
 
-  // メニューへ戻る
   const backBtn = document.querySelector('#backBtn');
   if (backBtn) backBtn.addEventListener('click', ()=>{ showPanel('#subjectPanel'); });
 
-  // 送信
   const input = document.querySelector('#answerInput');
   if (input) input.addEventListener('keydown', e=>{ if (e.key==='Enter') submitAnswer(); });
   const sb = document.querySelector('#submitBtn');
   if (sb) sb.addEventListener('click', () => submitAnswer());
 
-  // わからない
   const skipBtn = document.querySelector('#skipBtn');
   if (skipBtn) skipBtn.addEventListener('click', () => submitAnswer(false));
 
-  // 本日ポイントリセット
   const rstTop = document.querySelector('#resetTodayTop');
   if (rstTop) rstTop.addEventListener('click', resetTodayPoint);
   const rstBottom = document.querySelector('#resetToday');
@@ -338,13 +329,12 @@ document.addEventListener('click', (e)=>{
 function resetTodayPoint(){
   state.todayCount = 0;
   saveTodayPoint();
-  const els = [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')];
-  els.forEach(el => { if (el) el.textContent = '0'; });
+  [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
+    .forEach(el => { if (el) el.textContent = '0'; });
 }
 
 /***** 初期化 *****/
 window.addEventListener('DOMContentLoaded', ()=>{
-  console.log('[quiz-app] DOMContentLoaded');
   bindEvents();
   loadTodayPoint();
   showPanel('#subjectPanel');
