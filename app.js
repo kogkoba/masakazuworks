@@ -262,7 +262,7 @@ async function submitAnswer(kind = 'answer'){ // 'answer' | 'skip'
     }
   }
 
-  await logResult(row, result);
+  logResult(row, result); // awaitしない
 
   // 次へ待機モード（Enter 連打してもここで止まる）
   state.phase = "next";
