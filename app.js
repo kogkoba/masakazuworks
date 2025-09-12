@@ -1,6 +1,6 @@
 /***** 設定 *****/
 // 新しいGASのデプロイURLを使用
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxGhd2nI-2MFeA_meVlKOAtdzCz3LrKWXEjwcvljxn9LrzKA43ckd6eDe7hl6bcOQt4hQ/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxiQ5xQsfh6uDXZYHshoLtAmnGbICKBFzv5bjOIYQwHuZ2s45Zt8O46-4x-4IzENcIzTA/exec';
 const SUBJECTS = {
   "算数": { sheetName: "算数" },
   "国語": { sheetName: "国語" },
