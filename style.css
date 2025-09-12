@@ -136,3 +136,10 @@ input[type="text"]{
 
 /* キーボード出現や候補ポップアップ時にも入力欄が被りにくいよう余白 */
 .answer-area{margin-top:var(--space-sm)}
+
+.toolbar{
+  display:flex;justify-content:flex-end;align-items:center;
+  gap:12px;margin:6px 0 10px
+}
+.today-counter{display:flex;align-items:center;gap:10px}
+.today-counter button{padding:6px 10px}
