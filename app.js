@@ -1,6 +1,6 @@
 console.log('[quiz-app] boot');
 
-/***** 設定：最新 /exec URL をセット *****/
+/***** 設定：あなたの最新 /exec URL をセット *****/
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxw1_oqKmaY1plPI0fz8e-_9Fd-WgL8smWSTNpq2-qwWBDTNSbvKP0ymsOfex7dRsgmWg/exec";
 console.log('[quiz-app] GAS_URL =', GAS_URL);
 
@@ -40,14 +40,14 @@ function jsonp(url) {
 /***** 状態 *****/
 const state = {
   subject: "国語",
-  pool: "all",           // all | wrong_blank
+  pool: "all",           // all | wrong_blank（FALSE + 空白のみ）
   order: "random",       // random | sequential
   scope: "all",          // all | byweek
   week: null,
   rows: [],
   i: 0,
   todayCount: 0,
-  phase: "answer",       // "answer" or "next"
+  phase: "answer",       // "answer"（判定待ち）/ "next"（次へ待機）
   busy: false            // 二重操作防止
 };
 
@@ -215,47 +215,56 @@ async function logResult(row, result){
 async function submitAnswer(kind = 'answer'){ // 'answer' | 'skip'
   if (state.busy) return;
   if (state.i >= state.rows.length) return;
+  if (state.phase !== "answer") return; // 二重Enter防止
 
   const row = state.rows[state.i];
   const feedbackEl = document.querySelector('#feedback');
   const ansEl = document.querySelector('#answerInput');
-
-  // すでに判定済みなら無視
-  if (state.phase !== "answer") return;
 
   state.busy = true;
 
   let result = 'skip';
   if (kind === 'answer') {
     const user = norm(ansEl ? ansEl.value : '');
-    const corrects = new Set([norm(row.answer), ...parseAlts(row.alt_answers)]);
-    const isCorrect = corrects.has(user);
-    result = isCorrect ? 'correct' : 'wrong';
 
-    if (feedbackEl) {
-      feedbackEl.textContent = isCorrect ? '正解！' : `不正解… 正：${row.answer}`;
-      feedbackEl.classList.toggle('ok', isCorrect);
-      feedbackEl.classList.toggle('ng', !isCorrect);
-    }
+    // 入力が空白の場合は「スキップ扱い」で正解を表示
+    if (user === '') {
+      result = 'skip';
+      if (feedbackEl) {
+        feedbackEl.textContent = `スキップ… 正解は：${row.answer}`;
+        feedbackEl.classList.remove('ok','ng');
+      }
+    } else {
+      const corrects = new Set([norm(row.answer), ...parseAlts(row.alt_answers)]);
+      const isCorrect = corrects.has(user);
+      result = isCorrect ? 'correct' : 'wrong';
 
-    // 正解ならポイント加算
-    if (isCorrect){
-      state.todayCount += 1;
-      saveTodayPoint();
-      [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
-        .forEach(el => { if (el) el.textContent = String(state.todayCount); });
+      if (feedbackEl) {
+        feedbackEl.textContent = isCorrect ? '正解！' : `不正解… 正：${row.answer}`;
+        feedbackEl.classList.toggle('ok', isCorrect);
+        feedbackEl.classList.toggle('ng', !isCorrect);
+      }
+
+      // 正解ならポイント加算
+      if (isCorrect){
+        state.todayCount += 1;
+        saveTodayPoint();
+        [document.querySelector('#pointTodayTop'), document.querySelector('#pointToday')]
+          .forEach(el => { if (el) el.textContent = String(state.todayCount); });
+      }
     }
   } else {
-    // スキップ
+    // スキップボタン
+    result = 'skip';
     if (feedbackEl) {
-      feedbackEl.textContent = 'スキップしました';
+      feedbackEl.textContent = `スキップ… 正解は：${row.answer}`;
       feedbackEl.classList.remove('ok','ng');
     }
   }
 
   await logResult(row, result);
 
-  // 次へ待機モード
+  // 次へ待機モード（Enter 連打してもここで止まる）
   state.phase = "next";
   setNextVisible(true);
   state.busy = false;
@@ -363,22 +372,22 @@ function bindEvents(){
   // メニューへ戻る
   document.querySelector('#backBtn')?.addEventListener('click', ()=>{ showPanel('#subjectPanel'); });
 
-  // 送信（Enterはフェーズ別に動作）
+  // Enter挙動：判定 → 次へ
   const input = document.querySelector('#answerInput');
   if (input) {
     input.addEventListener('keydown', e=>{
       if (e.key === 'Enter') {
-        if (state.phase === 'answer') submitAnswer('answer');
-        else if (state.phase === 'next') goNext();
+        if (state.phase === 'answer') submitAnswer('answer'); // 空白なら「スキップして正答表示」
+        else if (state.phase === 'next') goNext();            // もう一度Enterで次へ
       }
     });
   }
   document.querySelector('#submitBtn')?.addEventListener('click', () => submitAnswer('answer'));
 
-  // わからない＝空白で保存
+  // スキップ（空白保存し、正解を表示）
   document.querySelector('#skipBtn')?.addEventListener('click', () => submitAnswer('skip'));
 
-  // 次へ（▶）
+  // 次へ（▶アイコン）
   document.querySelector('#nextBtn')?.addEventListener('click', () => goNext());
 
   // 本日ポイントリセット
