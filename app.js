@@ -4,21 +4,20 @@ const CFG = window.APP_CONFIG;
 const SHEET_JSON_BASE =
   `https://docs.google.com/spreadsheets/d/${CFG.sheetId}/gviz/tq?tqx=out:json&sheet=`;
 
-// localStorageキー（日付別の4科合計ポイント）
+// localStorage（日付別ポイント & 正誤）
 const LS_TODAY = `revquiz:points:${new Date().toISOString().slice(0,10)}`;
-// 科目ごとの正誤フラグ保存
-const LS_KEY = (subject) => `revquiz:${subject}:progress`; // { [id]: "TRUE"|"FALSE"|"" }
+const LS_KEY = (subject) => `revquiz:${subject}:progress`;
 
-// ===== DOM取得（nullセーフ） =====
+// ===== DOM（nullセーフ） =====
 const subjectPanel = document.getElementById('subjectPanel');
 const subjectTitle = document.getElementById('subjectTitle');
 const weekSelect   = document.getElementById('weekSelect');
 const startBtn     = document.getElementById('startBtn');
 
-const topPointEl = document.getElementById('pointTodayTop');
-const topResetBtn = document.getElementById('resetTodayTop');
+const topPointEl   = document.getElementById('pointTodayTop');
+const topResetBtn  = document.getElementById('resetTodayTop');
 const pointTodayEl = document.getElementById('pointToday');
-const resetTodayBtn = document.getElementById('resetToday');
+const resetTodayBtn= document.getElementById('resetToday');
 
 const quizPanel = document.getElementById('quizPanel');
 const backBtn = document.getElementById('backBtn');
@@ -33,15 +32,16 @@ const submitBtn = document.getElementById('submitBtn');
 const skipBtn   = document.getElementById('skipBtn');
 const nextBtn   = document.getElementById('nextBtn');
 
+// 状態
 let currentSubject = null;
 let allRows = [];       // 全件
 let quizRows = [];      // 出題用
 let order = 'random';   // random | sequential
 let pool  = 'all';      // all | wrong_or_blank
 let scope = 'all';      // all | byweek
-let seqIndex = 0;       // 順番モード用
+let seqIndex = 0;
 
-// ===== ポイント管理 =====
+// ===== ポイント =====
 const loadPointsToday = ()=> Number(localStorage.getItem(LS_TODAY) || '0');
 const savePointsToday = (v)=> localStorage.setItem(LS_TODAY, String(v));
 function updateTodayCounters(){
@@ -55,20 +55,41 @@ topResetBtn?.addEventListener('click', resetTodayPoints);
 resetTodayBtn?.addEventListener('click', resetTodayPoints);
 updateTodayCounters();
 
-// ===== gviz JSON 読み込み =====
+// ===== gviz JSON 読み込み（ヘッダー堅牢化） =====
 async function fetchSheetRows(subject){
   const res  = await fetch(SHEET_JSON_BASE + encodeURIComponent(subject));
   const text = await res.text();
-  // レスポンスは google.visualization.Query.setResponse({...}) 形式
   const json = JSON.parse(text.substring(text.indexOf('{'), text.lastIndexOf('}')+1));
-  const cols = json.table.cols.map(c => (c.label || c.id || '').trim());
+  const table = json.table;
 
-  // 1行目はヘッダー行として扱われるので、そのまま使える
-  const rows = json.table.rows.map(r => {
+  // すべてのセル値を文字列に
+  const grid = table.rows.map(r => (r.c||[]).map(c => (c && c.v != null ? String(c.v) : '')));
+
+  // 1) col.label を試す
+  let labels = (table.cols||[]).map(c => (c.label || '').trim());
+  const want = new Set(["id","week","question","answer","alt_answers","image_url","enabled"]);
+  let okCount = labels.filter(x => want.has(x)).length;
+
+  // 2) ラベルに欲しいものが無ければ、先頭行をヘッダーとして再解釈
+  if(okCount < 3 && grid.length){
+    const cand = grid[0].map(s => s.trim());
+    const match = cand.filter(x => want.has(x)).length;
+    if(match >= 3){
+      labels = cand;
+      grid.shift(); // データからヘッダー行を除外
+    }else{
+      // 3) 最後の手段：既知の並びを固定採用
+      labels = ["id","week","question","answer","alt_answers","image_url","enabled"];
+    }
+  }
+
+  // オブジェクト化
+  const rows = grid.map(arr => {
     const obj = {};
-    (r.c || []).forEach((cell, i) => {
-      obj[cols[i] || `col${i}`] = (cell && cell.v != null ? String(cell.v) : '').trim();
-    });
+    for(let i=0;i<labels.length;i++){
+      const key = labels[i] || `col${i}`;
+      obj[key] = (arr[i] || '').trim();
+    }
     return obj;
   });
   return rows;
@@ -83,18 +104,19 @@ function parseEnabled(v){
 }
 
 function normalizeRow(r){
+  const map = CFG.columnMap;
   return {
-    id: (r[CFG.columnMap.id]||'').trim(),
-    week: (r[CFG.columnMap.week]||'').trim(),
-    question: (r[CFG.columnMap.question]||'').trim(),
-    answer: (r[CFG.columnMap.answer]||'').trim(),
-    alt: (r[CFG.columnMap.alt]||'').trim(),
-    img: (r[CFG.columnMap.img]||'').trim(),
-    enabled: parseEnabled(r[CFG.columnMap.enabled])
+    id: (r[map.id]||'').trim(),
+    week: (r[map.week]||'').trim(),
+    question: (r[map.question]||'').trim(),
+    answer: (r[map.answer]||'').trim(),
+    alt: (r[map.alt]||'').trim(),
+    img: (r[map.img]||'').trim(),
+    enabled: parseEnabled(r[map.enabled])
   };
 }
 
-// ===== 正誤フラグ（ブラウザ保存） =====
+// ===== 進捗 =====
 function getProgress(subject){
   try{ return JSON.parse(localStorage.getItem(LS_KEY(subject))||'{}'); }
   catch(e){ return {}; }
@@ -107,7 +129,7 @@ function markResult(subject, id, isCorrect){
   setProgress(subject, p);
 }
 
-// ===== 絞り込み・並び替え =====
+// ===== フィルタ/並び替え =====
 function filterByPool(rows){
   if(pool==='all') return rows;
   const prog = getProgress(currentSubject);
@@ -118,14 +140,17 @@ function orderize(rows){
   return rows.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 }
 function naturalCompare(a, b) {
-  return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+  return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
 }
 
 // ===== セグメントUI =====
 function setScope(newScope){
   scope = newScope;
   document.querySelectorAll('.seg-btn').forEach(b=>b.classList.toggle('active', b.dataset.scope===scope));
-  weekSelect?.classList.toggle('hidden', scope!=='byweek');
+  if(weekSelect){
+    weekSelect.classList.toggle('hidden', scope!=='byweek');
+    weekSelect.disabled = (scope!=='byweek') ? true : false; // 念のため
+  }
 }
 document.querySelectorAll('.seg-btn').forEach(btn=>{
   btn.addEventListener('click', ()=> setScope(btn.dataset.scope));
@@ -146,26 +171,26 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(subjectTitle) subjectTitle.textContent = `科目：${currentSubject}`;
     subjectPanel?.classList.remove('hidden');
 
-    // 選択状態
     const poolRadio  = document.querySelector('input[name="pool"]:checked');
     const orderRadio = document.querySelector('input[name="order"]:checked');
     pool  = poolRadio ? poolRadio.value : 'all';
     order = orderRadio ? orderRadio.value : 'random';
 
-    // ★ JSONで安全に取得（改行OK）
+    // ★ JSONで取得（改行安全）＋ 必須列チェック
     const raw = await fetchSheetRows(currentSubject);
-    // 必須：question がある・enabled が無効でない
     allRows = raw.map(normalizeRow)
-                 .filter(r => r.question && r.enabled !== false);
+                 .filter(r => r.question && r.answer && r.enabled !== false);
 
-    // 授業回プルダウン（件数つき）
+    // 週プルダウン（件数つき／自然順）
     const buckets = allRows.reduce((m, r) => {
       const w=(r.week||'').trim(); if(!w) return m;
       m[w]=(m[w]||0)+1; return m;
     },{});
     const forced = (CFG.forceWeeks && CFG.forceWeeks[currentSubject]) || null;
     const weeks = forced || Object.keys(buckets).sort(naturalCompare);
+
     if(weekSelect){
+      weekSelect.disabled = false;
       weekSelect.innerHTML =
         `<option value="">授業回を選択</option>` +
         weeks.map(w=>`<option value="${w}">${w}${buckets[w]?`（${buckets[w]}問）`:''}</option>`).join('');
@@ -185,6 +210,7 @@ startBtn?.addEventListener('click', ()=>{
   }
   rows = filterByPool(rows);
   rows = orderize(rows);
+
   if(rows.length===0){ alert('出題対象がありません'); return; }
 
   quizRows = rows;
@@ -202,9 +228,26 @@ backBtn?.addEventListener('click', ()=>{
   updateTodayCounters();
 });
 
-// ===== 回答操作 =====
+// ===== 回答操作（Enterで採点/次へ） =====
 submitBtn?.addEventListener('click', ()=> grade());
-answerInput?.addEventListener('keydown', (e)=> { if(e.key==='Enter'){ grade(); }});
+answerInput?.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    const isNextVisible = nextBtn && !nextBtn.classList.contains('hidden');
+    if(isNextVisible){ next(); } else { grade(); }
+  }
+});
+// 入力欄にフォーカスがない時でも Enter で「次へ」
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter' && quizPanel && !quizPanel.classList.contains('hidden')){
+    const isInput = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+    if(!isInput && nextBtn && !nextBtn.classList.contains('hidden')){
+      e.preventDefault();
+      next();
+    }
+  }
+});
+
 skipBtn?.addEventListener('click', ()=>{
   showFeedback(false, `スキップしました。答え：${fmtAnswer(cur().answer)}`);
   markResult(currentSubject, cur().id, false);
@@ -242,7 +285,7 @@ function showQuestion(idx){
 function sanitize(s){ return (s||'').toString().trim().replace(/\s+/g,''); }
 function normalizeKana(s){
   return s.normalize('NFKC')
-          .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60)); // カナ→ひら
+          .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
 }
 function fmtAnswer(a){ return a; }
 
@@ -288,4 +331,3 @@ function next(){
     updateTodayCounters();
   }
 }
-
