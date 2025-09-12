@@ -1,9 +1,10 @@
 console.log('[quiz-app] boot');
 
-/***** 設定 *****/// ここを新URLに置き換え
+/***** 設定：あなたの最新 /exec URL をセット *****/
+const GAS_URL = "https://script.google.com/macros/s/AKfycbxw1_oqKmaY1plPI0fz8e-_9Fd-WgL8smWSTNpq2-qwWBDTNSbvKP0ymsOfex7dRsgmWg/exec";
+console.log('[quiz-app] GAS_URL =', GAS_URL);
 
-const GAS_URL = "https://script.google.com/macros/s/https://script.google.com/macros/s/AKfycbx51jPktIPrLQ-Dc8lmhkLn7RAOf8fcLy6vGqpkBEFxGAcHaTEgwpqr_gEnEj7pLDscrw/exec";
-
+/***** タブごとの gid（こぐれさん提供）*****/
 const SUBJECTS = {
   "算数": { gid: 0 },
   "国語": { gid: 162988483 },
@@ -95,7 +96,6 @@ async function loadWeeks() {
   const url = `${GAS_URL}?action=get&gid=${gid}&pool=all`;
   try {
     const json = await jsonp(url);
-    console.log('[loadWeeks]', json);
     if (!json.ok) throw new Error(json.error || 'fetch_error');
 
     const rows = Array.isArray(json.rows) ? json.rows : [];
@@ -124,7 +124,6 @@ async function loadQuestions(){
   setStatus(`読み込み中…（科目：${state.subject}）`);
   try{
     const json = await jsonp(url);
-    console.log('[loadQuestions]', json);
     if (!json.ok) throw new Error(json.error || 'fetch_error');
 
     let rows = Array.isArray(json.rows) ? json.rows : [];
@@ -206,7 +205,6 @@ async function submitAnswer(correctOverride=null){
     feedbackEl.classList.toggle('ng', !correct);
   }
 
-  // JSONPでログ（GET）
   try {
     const gid = SUBJECTS[state.subject].gid;
     const url = `${GAS_URL}?action=log&gid=${gid}&id=${encodeURIComponent(row.id)}&correct=${correct ? '1' : '0'}`;
@@ -264,13 +262,9 @@ function bindEvents(){
       b.classList.toggle('active', b.dataset.scope === 'all');
     });
     const weekSelect = document.querySelector('#weekSelect');
-    if (weekSelect) {
-      weekSelect.classList.add('hidden');
-      weekSelect.value = '';
-    }
+    if (weekSelect) { weekSelect.classList.add('hidden'); weekSelect.value = ''; }
 
-    if (changed) loadWeeks();
-    else if (!weekSelect || weekSelect.options.length <= 1) loadWeeks();
+    if (changed || (weekSelect && weekSelect.options.length <= 1)) loadWeeks();
   });
 
   document.addEventListener('change', (e)=>{
@@ -284,11 +278,9 @@ function bindEvents(){
     const btn = e.target.closest('.seg-btn[data-scope]');
     if (!btn) return;
     state.scope = btn.dataset.scope;
-
     document.querySelectorAll('.seg-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.scope === state.scope);
     });
-
     const weekSelect = document.querySelector('#weekSelect');
     if (state.scope === 'byweek') {
       weekSelect.classList.remove('hidden');
