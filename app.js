@@ -7,11 +7,11 @@ const LS_TODAY = `revquiz:points:${new Date().toISOString().slice(0,10)}`;
 // 科目ごとの正誤フラグ保存
 const LS_KEY = (subject) => `revquiz:${subject}:progress`; // { [id]: "TRUE"|"FALSE"|"" }
 
-// ===== DOM取得 =====
+// ===== DOM取得（存在しない時もあるので必ずnullチェックする） =====
 const subjectPanel = document.getElementById('subjectPanel');
 const subjectTitle = document.getElementById('subjectTitle');
-const weekSelect = document.getElementById('weekSelect');
-const startBtn = document.getElementById('startBtn');
+const weekSelect   = document.getElementById('weekSelect');
+const startBtn     = document.getElementById('startBtn');
 
 // トップの合計カウンター
 const topPointEl = document.getElementById('pointTodayTop');
@@ -34,6 +34,10 @@ const answerInput = document.getElementById('answerInput');
 const submitBtn = document.getElementById('submitBtn');
 const skipBtn   = document.getElementById('skipBtn');
 const nextBtn   = document.getElementById('nextBtn');
+
+// セグメント（存在しなければ null のまま）
+const segAllBtn  = document.querySelector('.seg-btn[data-scope="all"]');
+const segWeekBtn = document.querySelector('.seg-btn[data-scope="byweek"]');
 
 let currentSubject = null;
 let allRows = [];       // 全件（enabledのみ）
@@ -126,22 +130,40 @@ function filterByPool(rows){
   const prog = getProgress(currentSubject);
   return rows.filter(r => (prog[r.id]!=="TRUE")); // 未回答 or FALSE
 }
-
 function orderize(rows){
   if(order==='sequential') return rows.slice();
   return rows.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 }
 
-// ===== 画面イベント =====
+// ===== セグメントUI（nullでも落ちない） =====
+function setScope(newScope){
+  scope = newScope;
+  document.querySelectorAll('.seg-btn').forEach(b=>b.classList.toggle('active', b.dataset.scope===scope));
+  weekSelect?.classList.toggle('hidden', scope!=='byweek');
+}
+segAllBtn?.addEventListener('click', ()=> setScope('all'));
+segWeekBtn?.addEventListener('click', ()=> setScope('byweek'));
+
+// ===== ラジオ（存在する場合のみ） =====
+document.querySelectorAll('input[name="pool"]').forEach(r=>{
+  r.addEventListener('change', ()=> pool = r.value);
+});
+document.querySelectorAll('input[name="order"]').forEach(r=>{
+  r.addEventListener('change', ()=> order = r.value);
+});
+
+// ===== 科目タブ =====
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', async ()=>{
     currentSubject = btn.dataset.subject;
-    subjectTitle.textContent = `科目：${currentSubject}`;
-    subjectPanel.classList.remove('hidden');
+    subjectTitle && (subjectTitle.textContent = `科目：${currentSubject}`);
+    subjectPanel?.classList.remove('hidden');
 
     // 現在の選択状態
-    pool  = document.querySelector('input[name="pool"]:checked').value;
-    order = document.querySelector('input[name="order"]:checked').value;
+    const poolRadio  = document.querySelector('input[name="pool"]:checked');
+    const orderRadio = document.querySelector('input[name="order"]:checked');
+    pool  = poolRadio ? poolRadio.value : 'all';
+    order = orderRadio ? orderRadio.value : 'random';
 
     // データ取得
     const url = SHEET_BASE + encodeURIComponent(currentSubject);
@@ -151,8 +173,10 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     allRows = rows;
 
     // 授業回プルダウン（week列ユニーク）
-    const weeks = Array.from(new Set(rows.map(r=>r.week))).sort();
-    weekSelect.innerHTML = `<option value="">授業回を選択</option>` + weeks.map(w=> `<option>${w}</option>`).join('');
+    if(weekSelect){
+      const weeks = Array.from(new Set(rows.map(r=>r.week))).sort();
+      weekSelect.innerHTML = `<option value="">授業回を選択</option>` + weeks.map(w=> `<option>${w}</option>`).join('');
+    }
     // 初期表示は「小４全授業」
     setScope('all');
 
@@ -160,27 +184,11 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
   });
 });
 
-function setScope(newScope){
-  scope = newScope;
-  document.querySelectorAll('.seg-btn').forEach(b=>b.classList.toggle('active', b.dataset.scope===scope));
-  weekSelect.classList.toggle('hidden', scope!=='byweek');
-}
-
-document.querySelectorAll('.seg-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=> setScope(btn.dataset.scope));
-});
-
-document.querySelectorAll('input[name="pool"]').forEach(r=>{
-  r.addEventListener('change', ()=> pool = r.value);
-});
-document.querySelectorAll('input[name="order"]').forEach(r=>{
-  r.addEventListener('change', ()=> order = r.value);
-});
-
-startBtn.addEventListener('click', ()=>{
+// ===== スタート =====
+startBtn?.addEventListener('click', ()=>{
   let rows = allRows;
   if(scope==='byweek'){
-    const w = weekSelect.value;
+    const w = weekSelect?.value;
     if(!w){ alert('授業回を選んでください'); return; }
     rows = rows.filter(r=> r.week===w);
   }
@@ -191,26 +199,28 @@ startBtn.addEventListener('click', ()=>{
 
   quizRows = rows;
   seqIndex = 0;
-  qTotalEl.textContent = quizRows.length;
+  qTotalEl && (qTotalEl.textContent = quizRows.length);
   showQuestion(0);
-  subjectPanel.classList.add('hidden');
-  quizPanel.classList.remove('hidden');
+  subjectPanel?.classList.add('hidden');
+  quizPanel?.classList.remove('hidden');
 });
 
-backBtn.addEventListener('click', ()=>{
-  quizPanel.classList.add('hidden');
-  subjectPanel.classList.remove('hidden');
+// ===== 画面遷移 =====
+backBtn?.addEventListener('click', ()=>{
+  quizPanel?.classList.add('hidden');
+  subjectPanel?.classList.remove('hidden');
   updateTodayCounters();
 });
 
-submitBtn.addEventListener('click', ()=> grade());
-answerInput.addEventListener('keydown', (e)=> { if(e.key==='Enter'){ grade(); }});
-skipBtn.addEventListener('click', ()=>{
+// ===== 回答操作 =====
+submitBtn?.addEventListener('click', ()=> grade());
+answerInput?.addEventListener('keydown', (e)=> { if(e.key==='Enter'){ grade(); }});
+skipBtn?.addEventListener('click', ()=>{
   showFeedback(false, `スキップしました。答え：${fmtAnswer(cur().answer)}`);
   markResult(currentSubject, cur().id, false);
-  nextBtn.classList.remove('hidden');
+  nextBtn?.classList.remove('hidden');
 });
-nextBtn.addEventListener('click', ()=> next());
+nextBtn?.addEventListener('click', ()=> next());
 
 // ===== 出題/採点 =====
 function cur(){ return quizRows[seqIndex]; }
@@ -218,19 +228,22 @@ function cur(){ return quizRows[seqIndex]; }
 function showQuestion(idx){
   seqIndex = idx;
   const row = cur();
-  qIndexEl.textContent = (idx+1);
-  qWeekEl.textContent = row.week ? `（${row.week}）` : '';
-  qText.textContent = row.question || '';
-  if(row.img){
+  qIndexEl && (qIndexEl.textContent = (idx+1));
+  qWeekEl  && (qWeekEl.textContent = row.week ? `（${row.week}）` : '');
+  qText    && (qText.textContent = row.question || '');
+  if(row.img && qImage && qImageWrap){
     qImage.src = row.img;
     qImageWrap.classList.remove('hidden');
   }else{
-    qImageWrap.classList.add('hidden');
+    qImageWrap?.classList.add('hidden');
   }
-  answerInput.value = '';
-  answerInput.focus();
-  document.getElementById('feedback').textContent='';
-  nextBtn.classList.add('hidden');
+  if(answerInput){
+    answerInput.value = '';
+    answerInput.focus();
+  }
+  const fb = document.getElementById('feedback');
+  if(fb) fb.textContent='';
+  nextBtn?.classList.add('hidden');
 }
 
 function sanitize(s){ return (s||'').toString().trim().replace(/\s+/g,''); }
@@ -238,12 +251,11 @@ function normalizeKana(s){
   return s.normalize('NFKC')
           .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60)); // カナ→ひら
 }
-
 function fmtAnswer(a){ return a; }
 
 function grade(){
   const row = cur();
-  const input = normalizeKana(sanitize(answerInput.value));
+  const input = normalizeKana(sanitize(answerInput?.value));
   const target = normalizeKana(sanitize(row.answer));
 
   const alts = (row.alt||'')
@@ -262,11 +274,12 @@ function grade(){
     showFeedback(false, `ざんねん…　正解：${show}`);
     markResult(currentSubject, row.id, false);
   }
-  nextBtn.classList.remove('hidden');
+  nextBtn?.classList.remove('hidden');
 }
 
 function showFeedback(isOk, text){
   const fb = document.getElementById('feedback');
+  if(!fb) return;
   fb.className = 'feedback '+(isOk?'ok':'ng');
   fb.textContent = text;
 }
@@ -276,9 +289,11 @@ function next(){
     showQuestion(seqIndex+1);
   }else{
     const fb = document.getElementById('feedback');
-    fb.className='feedback ok';
-    fb.textContent='終了！おつかれさま！';
-    nextBtn.classList.add('hidden');
+    if(fb){
+      fb.className='feedback ok';
+      fb.textContent='終了！おつかれさま！';
+    }
+    nextBtn?.classList.add('hidden');
     updateTodayCounters();
   }
 }
