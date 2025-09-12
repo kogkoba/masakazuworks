@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>正和復習システム</title>
   <link rel="stylesheet" href="style.css">
-  <!-- ダミーfavicon（404回避） -->
+  <!-- 404回避のダミーfavicon -->
   <link rel="icon" href="data:,">
 </head>
 <body>
@@ -93,13 +93,12 @@
   </main>
 
   <script>
-    // スプレッドシート設定
     window.APP_CONFIG = {
       sheetId: "1L3dUsXqIPQSAhZJE1VbduKXJeABrx2Ob3w1YfqXG4aA",
       sheets: ["算数","国語","理科","社会"],
-      columnMap: { id: "id", week: "week", question: "question", answer: "answer", alt: "alt_answers", img: "image_url", enabled:"enabled" },
-      // 任意：データ未整備でweek候補を先に出したいとき
-      // forceWeeks: { "社会": ["g4-c00","g4-c01","g4-c02"] }
+      columnMap: { id:"id", week:"week", question:"question", answer:"answer", alt:"alt_answers", img:"image_url", enabled:"enabled" }
+      // 必要なら forceWeeks を追加できます
+      // forceWeeks: { "国語": ["G4-J35","G4-J36"] }
     };
   </script>
   <script src="app.js"></script>
