@@ -1,6 +1,8 @@
 // ===== 設定 =====
 const CFG = window.APP_CONFIG;
-const SHEET_BASE = `https://docs.google.com/spreadsheets/d/${CFG.sheetId}/gviz/tq?tqx=out:csv&sheet=`;
+// JSONで読む（セル改行でも安全）
+const SHEET_JSON_BASE =
+  `https://docs.google.com/spreadsheets/d/${CFG.sheetId}/gviz/tq?tqx=out:json&sheet=`;
 
 // localStorageキー（日付別の4科合計ポイント）
 const LS_TODAY = `revquiz:points:${new Date().toISOString().slice(0,10)}`;
@@ -13,15 +15,11 @@ const subjectTitle = document.getElementById('subjectTitle');
 const weekSelect   = document.getElementById('weekSelect');
 const startBtn     = document.getElementById('startBtn');
 
-// トップの合計カウンター
 const topPointEl = document.getElementById('pointTodayTop');
 const topResetBtn = document.getElementById('resetTodayTop');
-
-// 科目パネル側のカウンター
 const pointTodayEl = document.getElementById('pointToday');
 const resetTodayBtn = document.getElementById('resetToday');
 
-// クイズ画面
 const quizPanel = document.getElementById('quizPanel');
 const backBtn = document.getElementById('backBtn');
 const qIndexEl = document.getElementById('qIndex');
@@ -34,10 +32,6 @@ const answerInput = document.getElementById('answerInput');
 const submitBtn = document.getElementById('submitBtn');
 const skipBtn   = document.getElementById('skipBtn');
 const nextBtn   = document.getElementById('nextBtn');
-
-// セグメント
-const segAllBtn  = document.querySelector('.seg-btn[data-scope="all"]');
-const segWeekBtn = document.querySelector('.seg-btn[data-scope="byweek"]');
 
 let currentSubject = null;
 let allRows = [];       // 全件
@@ -55,48 +49,29 @@ function updateTodayCounters(){
   if(topPointEl)   topPointEl.textContent = v;
   if(pointTodayEl) pointTodayEl.textContent = v;
 }
-function addPoint(n=1){
-  savePointsToday(loadPointsToday()+n);
-  updateTodayCounters();
-}
-function resetTodayPoints(){
-  savePointsToday(0);
-  updateTodayCounters();
-}
+function addPoint(n=1){ savePointsToday(loadPointsToday()+n); updateTodayCounters(); }
+function resetTodayPoints(){ savePointsToday(0); updateTodayCounters(); }
 topResetBtn?.addEventListener('click', resetTodayPoints);
 resetTodayBtn?.addEventListener('click', resetTodayPoints);
-
-// 初期表示
 updateTodayCounters();
 
-// ===== CSVユーティリティ =====
-const csvParse = (csvText) => {
-  const lines = csvText.replace(/\r/g,'').split('\n');
-  const headers = splitCSVLine(lines[0] || '');
-  const rows = [];
-  for(let i=1;i<lines.length;i++){
-    if(!lines[i]?.trim()) continue;
-    const cols = splitCSVLine(lines[i]);
-    const obj = {};
-    headers.forEach((h,idx)=> obj[h.trim()] = (cols[idx]??'').toString().trim());
-    rows.push(obj);
-  }
-  return rows;
-};
+// ===== gviz JSON 読み込み =====
+async function fetchSheetRows(subject){
+  const res  = await fetch(SHEET_JSON_BASE + encodeURIComponent(subject));
+  const text = await res.text();
+  // レスポンスは google.visualization.Query.setResponse({...}) 形式
+  const json = JSON.parse(text.substring(text.indexOf('{'), text.lastIndexOf('}')+1));
+  const cols = json.table.cols.map(c => (c.label || c.id || '').trim());
 
-// カンマ・クォート対応の1行パーサ
-function splitCSVLine(line){
-  const out=[]; let cur=''; let inQ=false;
-  for(let i=0;i<line.length;i++){
-    const ch=line[i], nx=line[i+1];
-    if(ch==='"' && !inQ){ inQ=true; continue; }
-    if(ch==='"' && inQ && nx==='"'){ cur+='"'; i++; continue; }
-    if(ch==='"' && inQ && nx!=='"'){ inQ=false; continue; }
-    if(ch===',' && !inQ){ out.push(cur); cur=''; continue; }
-    cur+=ch;
-  }
-  out.push(cur);
-  return out;
+  // 1行目はヘッダー行として扱われるので、そのまま使える
+  const rows = json.table.rows.map(r => {
+    const obj = {};
+    (r.c || []).forEach((cell, i) => {
+      obj[cols[i] || `col${i}`] = (cell && cell.v != null ? String(cell.v) : '').trim();
+    });
+    return obj;
+  });
+  return rows;
 }
 
 // enabledの解釈（空=有効、FALSE/0/NO/無効のみ無効）
@@ -124,9 +99,7 @@ function getProgress(subject){
   try{ return JSON.parse(localStorage.getItem(LS_KEY(subject))||'{}'); }
   catch(e){ return {}; }
 }
-function setProgress(subject, prog){
-  localStorage.setItem(LS_KEY(subject), JSON.stringify(prog));
-}
+function setProgress(subject, prog){ localStorage.setItem(LS_KEY(subject), JSON.stringify(prog)); }
 function markResult(subject, id, isCorrect){
   if(!id) return;
   const p = getProgress(subject);
@@ -143,6 +116,9 @@ function filterByPool(rows){
 function orderize(rows){
   if(order==='sequential') return rows.slice();
   return rows.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+}
+function naturalCompare(a, b) {
+  return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
 }
 
 // ===== セグメントUI =====
@@ -170,49 +146,34 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(subjectTitle) subjectTitle.textContent = `科目：${currentSubject}`;
     subjectPanel?.classList.remove('hidden');
 
-    // 現在の選択状態
+    // 選択状態
     const poolRadio  = document.querySelector('input[name="pool"]:checked');
     const orderRadio = document.querySelector('input[name="order"]:checked');
     pool  = poolRadio ? poolRadio.value : 'all';
     order = orderRadio ? orderRadio.value : 'random';
 
-    // データ取得
-    const url = SHEET_BASE + encodeURIComponent(currentSubject);
-    const csv = await fetch(url).then(r=>r.text());
-    const rows = csvParse(csv).map(normalizeRow)
-                  .filter(r => r.question && r.answer && r.enabled !== false);
+    // ★ JSONで安全に取得（改行OK）
+    const raw = await fetchSheetRows(currentSubject);
+    // 必須：question がある・enabled が無効でない
+    allRows = raw.map(normalizeRow)
+                 .filter(r => r.question && r.enabled !== false);
 
-    allRows = rows;
-
-    // 授業回プルダウン（week列ユニーク + 件数表示 + 自然順）
+    // 授業回プルダウン（件数つき）
     const buckets = allRows.reduce((m, r) => {
-      const w = (r.week || '').trim();
-      if (!w) return m;
-      m[w] = (m[w] || 0) + 1;
-      return m;
-    }, {});
+      const w=(r.week||'').trim(); if(!w) return m;
+      m[w]=(m[w]||0)+1; return m;
+    },{});
     const forced = (CFG.forceWeeks && CFG.forceWeeks[currentSubject]) || null;
     const weeks = forced || Object.keys(buckets).sort(naturalCompare);
-
     if(weekSelect){
       weekSelect.innerHTML =
         `<option value="">授業回を選択</option>` +
-        weeks.map(w => {
-          const n = buckets[w] ?? '';
-          return `<option value="${w}">${w}${n ? `（${n}問）` : ''}</option>`;
-        }).join('');
+        weeks.map(w=>`<option value="${w}">${w}${buckets[w]?`（${buckets[w]}問）`:''}</option>`).join('');
     }
-    // 既定は「小４全授業」
     setScope('all');
-
     updateTodayCounters();
   });
 });
-
-// 文字列中の数字を考慮した自然順ソート
-function naturalCompare(a, b) {
-  return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
-}
 
 // ===== スタート =====
 startBtn?.addEventListener('click', ()=>{
@@ -224,7 +185,6 @@ startBtn?.addEventListener('click', ()=>{
   }
   rows = filterByPool(rows);
   rows = orderize(rows);
-
   if(rows.length===0){ alert('出題対象がありません'); return; }
 
   quizRows = rows;
@@ -271,6 +231,7 @@ function showQuestion(idx){
 
   if(answerInput){
     answerInput.value = '';
+    answerInput.placeholder = 'ここにタイピング';
     answerInput.focus();
   }
   const fb = document.getElementById('feedback');
@@ -287,14 +248,12 @@ function fmtAnswer(a){ return a; }
 
 function grade(){
   const row = cur();
-  const input = normalizeKana(sanitize(answerInput?.value));
+  const input  = normalizeKana(sanitize(answerInput?.value));
   const target = normalizeKana(sanitize(row.answer));
-
   const alts = (row.alt||'')
     .split(/[\/|、,]| or /i)
     .map(s=> normalizeKana(sanitize(s)))
     .filter(Boolean);
-
   const ok = input && (input===target || alts.includes(input));
 
   if(ok){
