@@ -1,145 +1,45 @@
-/***************************************************************
- * 正和復習システム - 完全版スタイルシート（可変パラメータ対応）
- * 目的：問題文～戻るまでの文字を小さく、画像を大きく見せる
- * 変更しやすいようフォントサイズ/画像サイズはCSS変数で管理
- ****************************************************************/
-
-/* ===================== 基本テーマ変数 ===================== */
-:root{
-  /* カラー */
-  --bg:#0b1020;
-  --fg:#fff;
-  --muted:#9aa3b2;
-  --card:#121a33;
-  --accent:#4fc3f7;
-
-  /* フォント（デフォルト=コンパクト） */
-  --font-h1:28px;
-  --font-ui:14px;            /* ボタン/UI共通 */
-  --font-question:14px;      /* 問題文 */
-  --font-input:14px;         /* 解答入力 */
-
-  /* 画像サイズ（vhで画面高に対する割合） */
-  --img-container-vh:60vh;   /* 画像ブロック上限 */
-  --img-max-vh:55vh;         /* 実際の画像上限 */
-
-  /* レイアウト */
-  --radius:10px;
-  --space-xs:8px;
-  --space-sm:12px;
-  --space-md:16px;
-  --shadow-card:0 6px 14px rgba(0,0,0,.18);
-  --shadow-img:0 6px 16px rgba(0,0,0,.3);
-}
-
-/* ====== 任意：従来サイズに戻したいときは body に .ui-regular を付与 ====== */
-.ui-regular{
-  --font-ui:16px;
-  --font-question:20px;
-  --font-input:18px;
-  --img-container-vh:40vh;
-  --img-max-vh:35vh;
-}
-
-/* ====== 画像をさらに大きく見せたい回（地図など）は .ui-xl-image を付与 ====== */
-.ui-xl-image{
-  --img-container-vh:70vh;
-  --img-max-vh:66vh;
-}
-
-/* ====== 画面が十分に広いときは画像を少し拡大（compact時のみ） ====== */
-@media (min-width: 768px) and (min-height: 820px){
-  body:not(.ui-regular){
-    --img-container-vh:65vh;
-    --img-max-vh:60vh;
-  }
-}
-
-/* ===================== ベースリセット/骨格 ===================== */
 *{box-sizing:border-box}
-body{
-  margin:0;
-  background:var(--bg);
-  color:var(--fg);
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-  font-size:var(--font-ui);
-}
-.wrap{max-width:920px;margin:24px auto;padding:0 16px}
-h1{font-size:var(--font-h1);margin:0 0 var(--space-md)}
-.card{
-  background:var(--card);
-  padding:var(--space-md);
-  border-radius:var(--radius);
-  margin:12px 0;
-  box-shadow:var(--shadow-card)
-}
-
-.row{display:flex;gap:var(--space-xs);flex-wrap:wrap}
-.row.between{justify-content:space-between;align-items:center}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;background:#0b1020;color:#fff}
+.wrap{max-width:980px;margin:auto;padding:20px}
+h1{margin:0 0 12px}
+h2.step{margin:0 0 10px;font-size:18px;opacity:.95}
+.card{background:#121a33;border:1px solid #23305a;border-radius:14px;padding:16px;margin-top:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
 .hidden{display:none}
-.mt{margin-top:var(--space-sm)}
-.mb{margin-bottom:var(--space-sm)}
-.small{font-size:13px;color:var(--muted)}
-hr{border:none;border-top:1px solid #334;margin:var(--space-sm) 0}
 
-/* ===================== ボタン/入力 ===================== */
-button{
-  padding:8px 12px;                 /* コンパクト */
-  border:none;border-radius:8px;
-  cursor:pointer;font-weight:700;
-  font-size:var(--font-ui);
-}
-button.primary{background:var(--accent);color:#000}
-button.ghost{background:transparent;border:1px solid #667;color:#fff}
-
-input[type="text"]{
-  width:100%;
-  padding:8px;                      /* コンパクト */
-  border-radius:8px;
-  border:1px solid #445;
-  background:#0f1630;
-  color:#fff;
-  font-size:var(--font-input);
-}
-
-/* ===================== 問題文 ===================== */
-#qText{
-  font-size:var(--font-question);
-  line-height:1.4;
-  margin-bottom:8px;
-}
-
-/* ===================== 画像表示 ===================== */
-/* 画像コンテナ：中央寄せ＋高さ上限をvhで管理 */
-#qImage{
-  text-align:center;
-  max-height:var(--img-container-vh);
-  margin-bottom:var(--space-sm);
-}
-
-/* 実画像：コンテナの幅に収めつつ、縦はvhで拡大 */
-#img{
-  max-width:100%;
-  max-height:var(--img-max-vh);
-  height:auto;                      /* 比率維持 */
-  object-fit:contain;               /* 余白込みで全体を収める */
-  border-radius:8px;
-  box-shadow:var(--shadow-img);
-}
-
-/* ===================== 細かな調整 ===================== */
-/* 小画面でのタップしやすさは確保（高さのみ微増） */
-@media (max-width:420px){
-  button{padding:10px 14px}
-  input[type="text"]{padding:10px}
-}
-
-/* キーボード出現や候補ポップアップ時にも入力欄が被りにくいよう余白 */
-.answer-area{margin-top:var(--space-sm)}
-
-.toolbar{
-  display:flex;justify-content:flex-end;align-items:center;
-  gap:12px;margin:6px 0 10px
-}
+.toolbar{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:6px 0 10px}
 .today-counter{display:flex;align-items:center;gap:10px}
 .today-counter button{padding:6px 10px}
+
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tab-btn{background:#1e2a54;border:1px solid #44548f;color:#fff;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:600}
+.tab-btn:hover{filter:brightness(1.1)}
+
+.seg{display:inline-flex;background:#0f1837;border:1px solid #2f3d70;border-radius:10px;overflow:hidden}
+.seg-btn{background:transparent;color:#fff;padding:8px 14px;border:none;cursor:pointer}
+.seg-btn.active{background:#3a68ff;color:#000;font-weight:700}
+
+.mode-row{display:flex;align-items:center;gap:12px;margin:8px 0}
+#weekSelect{padding:8px;border-radius:8px;border:1px solid #44548f;background:#0f1837;color:#fff}
+
+.filters{display:flex;gap:16px;align-items:center;margin:8px 0}
+.filters label{opacity:.9}
+.filters .spacer{flex:1}
+
+.primary{background:#4fc3f7;color:#000;border:none;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer}
+.ghost{background:transparent;color:#fff;border:1px solid #7b86b2;border-radius:10px;padding:9px 14px;cursor:pointer}
+
+.start-row{display:flex;align-items:center;gap:12px;margin-top:8px;justify-content:space-between}
+.counter{display:flex;align-items:center;gap:10px}
+
+.quiz-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.q-image{margin:8px 0}
+.q-image img{max-width:100%;border-radius:10px;border:1px solid #334}
+.q-text{font-size:1.1rem;line-height:1.7;margin:8px 0 4px;white-space:pre-wrap}
+.answer-row{display:flex;gap:8px;align-items:center}
+#answerInput{flex:1;padding:12px;border-radius:10px;border:none;background:#0f1837;color:#fff;font-size:1.05rem}
+.feedback{min-height:28px;margin-top:8px}
+.feedback.ok{color:#76ff7a}
+.feedback.ng{color:#ff8a80}
+.nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+
+.foot{opacity:.7;margin-top:20px;text-align:center}
