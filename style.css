@@ -146,44 +146,12 @@ h2.step {
   margin-bottom: 8px;
 }
 
-/* === 問題の画像（完成版）=== */
-.q-image-wrap { margin: 8px 0 10px; text-align: center; }
-
+/* === 問題の画像 === */
+.q-image-wrap { margin: 8px 0; }
 .q-image-wrap img {
-  display: inline-block;
-
-  /* 横は親幅を超えない・極端に小さくなりにくい */
-  width: auto;
-  max-width: min(100%, 720px);
-
-  /* アスペクト比維持＆はみ出し防止 */
-  height: auto;
-  object-fit: contain;
-
-  /* 枠線など */
+  max-width: 40%;
   border-radius: 10px;
   border: 1px solid #334;
-
-  /* ▼縦の上限（最小170px/理想は画面高の36%/最大520px） */
-  max-height: clamp(170px, 36vh, 520px);
-
-  /* ▼iOS等の“動的ビューポート”対応（対応環境で上書き） */
-  max-height: clamp(170px, 38dvh, 520px);
-}
-
-/* PCは少し大きめに（1画面内に収まる範囲で） */
-@media (min-width: 1024px) {
-  .q-image-wrap img { max-height: clamp(200px, 42vh, 560px); }
-}
-
-/* スマホ縦：キーボード考慮でやや小さめ */
-@media (max-width: 767px) and (orientation: portrait) {
-  .q-image-wrap img { max-height: clamp(160px, 34dvh, 460px); }
-}
-
-/* スマホ横：高さに余裕が出るので少し大きく */
-@media (max-width: 767px) and (orientation: landscape) {
-  .q-image-wrap img { max-height: clamp(140px, 50dvh, 520px); }
 }
 
 /* === 問題文 === */
