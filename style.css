@@ -149,7 +149,7 @@ h2.step {
 /* === 問題の画像 === */
 .q-image-wrap { margin: 8px 0; }
 .q-image-wrap img {
-  max-width: 50%;
+  max-width: 65%;
   border-radius: 10px;
   border: 1px solid #334;
 }
